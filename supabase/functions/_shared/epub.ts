@@ -1,3 +1,4 @@
+import { coverFonts } from "./cover-fonts.ts";
 import JSZip from "npm:jszip@3.10.1";
 import { ImageResponse } from "npm:@vercel/og@0.6.8";
 import React from "npm:react@19.1.1";
@@ -7,6 +8,7 @@ import { Buffer } from "node:buffer";
 import { PNG } from "npm:pngjs@7.0.0";
 import jpeg from "npm:jpeg-js@0.4.4";
 import type { Article, ArticleAsset } from "./article.ts";
+import { buildCoverLines, publicationTitle, type CoverLine } from "./publication-identity.ts";
 
 export type EpubArticle = Article & {
   feed_id?: string | null;
@@ -95,7 +97,6 @@ function datePart(date: Date, timezone: string, type: Intl.DateTimeFormatPartTyp
   return parts.find((part) => part.type === type)?.value || "";
 }
 
-type CoverLine = { section: string; story: string };
 
 function displaySectionName(value: string | null | undefined) {
   const name = String(value || "").trim();
@@ -109,36 +110,6 @@ function sectionDeck(value: string | null | undefined) {
   if (name === "Related Discovery") return "Further reading on ideas running through this issue.";
   if (name === "Open Discovery") return "A deliberate detour.";
   return "";
-}
-
-function coverSectionName(value: string | null | undefined) {
-  const name = displaySectionName(value);
-  if (name === "Related Discovery") return "Further reading";
-  if (name === "Open Discovery") return "A deliberate detour";
-  return name;
-}
-
-function compactCoverText(value: string, max = 88) {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
-  if (text.length <= max) return text;
-  const clipped = text.slice(0, max - 1).replace(/\s+\S*$/, "").trim();
-  return (clipped || text.slice(0, max - 1)).trim() + "…";
-}
-
-function coverLinesFor(articles: EpubArticle[]): CoverLine[] {
-  const groups = new Map<string, EpubArticle[]>();
-  for (const article of articles) {
-    const raw = String(article.section_name || "Other").trim() || "Other";
-    if (!groups.has(raw)) groups.set(raw, []);
-    groups.get(raw)!.push(article);
-  }
-  const primary = [...groups.entries()].filter(([name]) => name !== "Related Discovery" && name !== "Open Discovery" && !/^other$/i.test(name));
-  const elsewhere = [...groups.entries()].filter(([name]) => /^other$/i.test(name));
-  const discovery = [...groups.entries()].filter(([name]) => name === "Related Discovery" || name === "Open Discovery");
-  return [...primary, ...elsewhere, ...discovery].slice(0, 3).map(([name, items]) => ({
-    section: coverSectionName(name),
-    story: compactCoverText(items[0]?.title || "", 92),
-  }));
 }
 
 function coverSectionSize(value: string, lead = false) {
@@ -161,7 +132,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   const cover = element("div", {
     style: {
       width: "100%", height: "100%", display: "flex", flexDirection: "column",
-      background: paper, color: ink, fontFamily: "serif", border: `10px solid ${ink}`,
+      background: paper, color: ink, fontFamily: "PublicationSerif", border: `10px solid ${ink}`,
       padding: "56px 62px 48px",
     },
   },
@@ -230,7 +201,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   }, lead.section),
   lead.story ? element("div", {
     style: {
-      fontFamily: "sans-serif", fontSize: 28, lineHeight: 1.24, marginTop: 28,
+      fontFamily: "PublicationSans", fontSize: 28, lineHeight: 1.24, marginTop: 28,
       color: "#e4e4e4", maxWidth: 980,
     },
   }, lead.story) : null),
@@ -252,7 +223,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
       style: { fontSize: coverSectionSize(line.section), fontWeight: 700, lineHeight: 1.02, letterSpacing: -1.1 },
     }, line.section),
     line.story ? element("div", {
-      style: { fontFamily: "sans-serif", fontSize: 22, lineHeight: 1.28, color: muted, marginTop: 9 },
+      style: { fontFamily: "PublicationSans", fontSize: 22, lineHeight: 1.28, color: muted, marginTop: 9 },
     }, line.story) : null
   )))),
   element("div", {
@@ -265,7 +236,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   element("div", null, `${articleCount} ${articleCount === 1 ? "story" : "stories"}`),
   element("div", { style: { textTransform: "none", letterSpacing: .4 } }, "reader.antonioskilton.com")));
 
-  const response = new ImageResponse(cover, { width: 1200, height: 1920 });
+  const response = new ImageResponse(cover, { width: 1200, height: 1920, fonts: coverFonts });
   if (!response.ok) throw new Error("Could not render the cover image.");
   return new Uint8Array(await response.arrayBuffer());
 }
@@ -287,7 +258,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   zip.folder("META-INF")!.file("container.xml", `<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const output = zip.folder("OEBPS")!;
-  const cover = await makeCoverJpeg(options, articles.length, coverLinesFor(articles));
+  const cover = await makeCoverJpeg(options, articles.length, buildCoverLines(articles));
   output.file("cover.jpg", cover);
 
   const maxAssetBytes = options.maxAssetBytes || 18_000_000;
@@ -328,10 +299,12 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   }
 
   const sectionPages = navGroups.map((group, groupIndex) => {
-    const href = `section-${groupIndex + 1}.xhtml`;
+    const hasDivider = prepared.length > 2;
+    const dividerHref = `section-${groupIndex + 1}.xhtml`;
     const articleCount = group.topics.reduce((count, topic) => count + topic.items.length, 0);
     const firstArticleIndex = group.topics.flatMap((topic) => topic.items)[0]?.index ?? null;
-    return { group, href, articleCount, id: `section-${groupIndex + 1}`, firstArticleIndex };
+    const href = hasDivider ? dividerHref : `article-${(firstArticleIndex ?? 0) + 1}.xhtml`;
+    return { group, href, articleCount, id: `section-${groupIndex + 1}`, firstArticleIndex, hasDivider };
   });
 
   const introduction = String(options.introduction || "").trim();
@@ -367,7 +340,8 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   }).join("");
   output.file("contents.xhtml", `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${esc(options.name)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><main class="contents"><p class="date">${esc(options.displayDate)}</p><h1 class="publication-title">${esc(options.name)}</h1><p class="contents-kicker">In this issue</p>${readerContents}</main></body></html>`);
 
-  for (const { group, href, articleCount } of sectionPages) {
+  for (const { group, href, articleCount, hasDivider } of sectionPages) {
+    if (!hasDivider) continue;
     const label = displaySectionName(group.name);
     const deck = sectionDeck(group.name);
     const titleSize = label.length > 38 ? "1.72em" : label.length > 28 ? "2.02em" : label.length > 20 ? "2.28em" : "2.55em";
@@ -383,6 +357,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`,
   ];
   for (const section of sectionPages) {
+    if (!section.hasDivider) continue;
     manifest.push(`<item id="${section.id}" href="${section.href}" media-type="application/xhtml+xml"/>`);
   }
   prepared.forEach((article, index) => {
@@ -395,7 +370,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     `<itemref idref="contents"/>`,
   ];
   for (const section of sectionPages) {
-    spine.push(`<itemref idref="${section.id}"/>`);
+    if (section.hasDivider) spine.push(`<itemref idref="${section.id}"/>`);
     for (const topic of section.group.topics) {
       for (const { index } of topic.items) {
         spine.push(`<itemref idref="article-${index + 1}"/>`);
@@ -443,7 +418,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     return `<navPoint id="nav-${sectionOrder}" playOrder="${sectionOrder}"><navLabel><text>${esc(label)}</text></navLabel><content src="${section.href}"/>${sectionChildren}</navPoint>`;
   }).join("");
   output.file("toc.ncx", `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd"><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="urn:uuid:${bookId}"/></head><docTitle><text>${esc(options.name)}</text></docTitle><navMap>${ncxIntroduction}${ncxSections}</navMap></ncx>`);
-  output.file("content.opf", `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">urn:uuid:${bookId}</dc:identifier><dc:title>${esc(options.libraryTitle || `${options.name} — ${options.displayDate}`)}</dc:title><dc:language>en</dc:language><dc:creator>Long Form</dc:creator><meta name="cover" content="cover-image"/><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta><meta property="rendition:layout">reflowable</meta></metadata><manifest>${manifest.join("")}</manifest><spine toc="ncx">${spine.join("")}</spine></package>`);
+  output.file("content.opf", `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bookid">urn:uuid:${bookId}</dc:identifier><dc:title>${esc(options.libraryTitle || publicationTitle(options.name, options.displayDate))}</dc:title><dc:language>en</dc:language><dc:creator>Long Form</dc:creator><meta name="cover" content="cover-image"/><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}</meta><meta property="rendition:layout">reflowable</meta></metadata><manifest>${manifest.join("")}</manifest><spine toc="ncx">${spine.join("")}</spine></package>`);
   return await zip.generateAsync({ type: "uint8array", mimeType: "application/epub+zip", compression: "DEFLATE", compressionOptions: { level: 6 } });
 }
 
