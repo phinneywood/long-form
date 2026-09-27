@@ -20,6 +20,22 @@ test('email-only sign-in has an explicit heading and button', async () => {
   assert.equal(result[0], 'Sign in with email.');assert.equal(result[1], 'Send code');
 });
 
+test('public sample identifies real articles and never implies they are the reader’s issue',async()=>{
+  const result=await run(`landing();document.querySelector('#read-sample').click();const text=modal.textContent,links=[...modal.querySelectorAll('.sample-article a')].map(a=>a.href);document.querySelector('#sample-start').click();return {text,links,focused:document.activeElement.id}`);
+  assert.match(result.text,/public example/i);assert.match(result.text,/your issue will use the sources you add/i);
+  assert.equal(result.links.length,2);assert.ok(result.links.every(url=>url.startsWith('https://')));assert.equal(result.focused,'email');
+});
+
+test('expired sign-in codes can be resent to the same address',async()=>{
+  const result=await run(`let calls=[];api=async(path,options)=>{calls.push({path,body:options.body});return {ok:true}};verify('reader@example.com','That code has expired.');await document.querySelector('#resend-code').onclick({currentTarget:document.querySelector('#resend-code')});return {calls,error:document.querySelector('.notice.error'),email:document.querySelector('.auth-lede').textContent}`);
+  assert.equal(result.calls.length,1);assert.equal(result.calls[0].path,'/auth/request-code');assert.equal(result.calls[0].body.email,'reader@example.com');assert.equal(result.error,null);assert.match(result.email,/reader@example.com/);
+});
+
+test('unfinished account resumes at source review, and a queued issue resumes at the explicit delivery choice',async()=>{
+  const result=await run(`state.settings.onboarding_complete=false;state.settings.kindle_email='';render();const sourceReview=!!document.querySelector('#starter-kindle'),reviewLabel=document.querySelector('.review-source')?.getAttribute('aria-label');onboarding();const zone=document.querySelector('#timezone').value;document.querySelector('#back-to-paper').click();const backAtReview=!!document.querySelector('#starter-kindle');state.settings.kindle_email='reader@kindle.com';state.jobs=[{id:'j1',reason:'manual',status:'queued'}];render();const choice=modal.textContent,button=document.querySelector('#connect-kindle').textContent;return {sourceReview,reviewLabel,zone,backAtReview,choice,button}`);
+  assert.ok(result.sourceReview&&result.backAtReview);assert.match(result.reviewLabel,/Review Example source/);assert.equal(result.zone,'UTC');assert.match(result.choice,/Daily at 06:00 · UTC/);assert.match(result.choice,/daily delivery stays off/i);assert.equal(result.button,'Finish setup');
+});
+
 test('opening and reloading a saved session restores the dashboard without a code',async()=>{
   const result=await run(`localStorage.morningReaderToken=token;let calls=0;fetch=async()=>{calls++;return new Response(JSON.stringify(state),{status:200})};await startApp();await startApp();return {calls,saved:localStorage.morningReaderToken,dashboard:!!document.querySelector('#one-time-send')}`);
   assert.equal(result.calls,2);assert.equal(result.saved,'test-token');assert.ok(result.dashboard);
