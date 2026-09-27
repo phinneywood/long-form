@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { Buffer } from "node:buffer";
 import { XMLParser } from "npm:fast-xml-parser@5.11.1";
 import { extractArticle, extractionBudget, hydrateArticleImages, omitArticleImages, type ExtractionBudget, fetchPublicText, sha256, textValue } from "../_shared/article.ts";
 import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "../_shared/delivery.ts";
@@ -172,9 +173,7 @@ function testArtifactIdentity(job: any, now: Date, timezone: string, displayDate
 }
 
 function base64(bytes: Uint8Array) {
-  let output = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) output += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  return btoa(output);
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
 function summarizeMedia(items: EpubArticle[]) {
@@ -305,7 +304,7 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
 
   const frozen = job.result?.preparation_manifest;
   if ([1, 2, 3].includes(frozen?.version) && Array.isArray(frozen.groups)) {
-    const restore = (item: any): EpubArticle => ({ ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: typeof asset.bytes === "string" ? Uint8Array.from(atob(asset.bytes), char => char.charCodeAt(0)) : asset.bytes })) });
+    const restore = (item: any): EpubArticle => ({ ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: typeof asset.bytes === "string" ? Buffer.from(asset.bytes, "base64") : asset.bytes })) });
     selectedGroups = frozen.groups.map((group: any) => ({ ...group, items: group.items.map(restore) }));
     pendingItems = Array.isArray(frozen.pendingItems) ? frozen.pendingItems.map(restore) : [];
     issues = Array.isArray(frozen.issues) ? frozen.issues : [];
@@ -686,7 +685,7 @@ async function prepareDeliveryPayload(job: any, deadline: number, previewOnly = 
     editorial: (prepared as any).editorial || null,
     qa: (prepared as any).qa || null,
     media: (prepared as any).media || null,
-    pendingItems: (prepared as any).pendingItems || [],
+    pendingItems: ((prepared as any).pendingItems || []).map(({ body, assets, ...item }: any) => item),
   };
 }
 
