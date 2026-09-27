@@ -15,6 +15,8 @@ export type EpubArticle = Article & {
   section_id?: string | null;
   section_name?: string | null;
   pending_id?: string | null;
+  pending_ids?: string[];
+  supplement_kind?: "catchup";
   editorial_topic?: string | null;
   editorial_topic_intro?: string | null;
   editorial_decision_reason?: string | null;

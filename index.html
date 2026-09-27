@@ -57,6 +57,36 @@ function maskEmail(value){
 }
 
 
+function issueSupplyText(job){
+  const supply=job?.result?.editorial?.supply;if(!supply)return '';
+  const parts=[`About ${supply.estimated_reading_minutes} minutes of reading`,`${supply.fresh_articles} new from checked sources`];
+  if(supply.catchup_articles)parts.push(`${supply.catchup_articles} earlier unread`);
+  if(supply.discovery_articles)parts.push(`${supply.discovery_articles} discoveries`);
+  const unavailable=(supply.failed_sources||0)+(supply.unchecked_sources||0);
+  if(unavailable)parts.push(`${unavailable} source${unavailable===1?'':'s'} unavailable`);
+  return parts.join(' · ');
+}
+function issueSupplyDetails(job){
+  const supply=job?.result?.editorial?.supply;if(!supply)return '';
+  const summary=issueSupplyText(job);
+  const note=supply.short_issue?'This was a lighter issue. The 30-minute target guides additions; it never forces filler.':'The reading target never removes or shortens subscribed articles.';
+  const rows=(supply.feed_reports||[]).map(r=>{
+    if(r.status==='failed'||r.status==='not_checked')return `<p class="small"><strong>${esc(displayText(r.name))}</strong>: ${esc(r.error||'Not checked before the preparation limit.')}</p>`;
+    const counts=[`${r.entries_seen} entries found`,`${r.fresh_included+r.catchup_included} included`];
+    if(r.invalid)counts.push(`${r.invalid} invalid entries`);
+    if(r.already_delivered)counts.push(`${r.already_delivered} already delivered`);
+    if(r.outside_window)counts.push(`${r.outside_window} outside the date window`);
+    if(r.duplicates)counts.push(`${r.duplicates} duplicates`);
+    if(r.extraction_failed)counts.push(`${r.extraction_failed} unreadable`);
+    if(r.out_of_scope)counts.push(`${r.out_of_scope} outside the source filter`);
+    if(r.not_needed)counts.push(`${r.not_needed} not used for catch-up`);
+    if(r.resource_deferred+r.scan_limited)counts.push(`${r.resource_deferred+r.scan_limited} deferred by limits`);
+    if(r.retries)counts.push('recovered after retry');
+    return `<p class="small"><strong>${esc(displayText(r.name))}</strong>: ${esc(counts.join(' · '))}</p>`;
+  }).join('');
+  return `<details class="mt-2"><summary>Why this issue was this size</summary><p class="small muted">${esc(summary)}. ${esc(note)}</p>${rows}</details>`;
+}
+
 function latestRunText(job){
   if(!job)return 'No deliveries yet';
   const when=fmtTime(job.finished_at||job.updated_at||job.created_at);
@@ -268,21 +298,72 @@ function starterReady(){
     <section class="starter-ready onboarding-page">
       <div class="editorial-label">Your sources</div>
       <h1>Review your sources.</h1>
-      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before ${kindleSaved?'sending your first issue':'connecting Kindle'}; you can edit or remove them here.</div>
+      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before preparing your first issue; you can edit or remove them here.</div>
       <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div>${feed.last_error?`<div class="feed-error">Last check failed: ${esc(feed.last_error)}</div>`:''}</div><button class="btn small-btn review-source" data-id="${esc(feed.id)}" aria-label="Review ${esc(displayText(feed.name||feed.url))}">Review</button></div>`).join('')}</div>
+      <div class="field"><label for="first-editor-guidance">Anything your AI editor should know?</label><textarea class="input" id="first-editor-guidance" rows="3" maxlength="3000" placeholder="For example: I enjoy science, history, and thoughtful essays.">${esc(state.settings.editorial_brief||'')}</textarea><div class="small muted">Optional. Leave this blank to skip. It guides organization and discovery; your subscribed articles stay intact.</div></div>
       <div class="ready-actions">
         <button class="btn" id="starter-another">+ Add another source</button>
-        <button class="btn primary" id="starter-kindle">${kindleSaved?'Continue to first issue':'Continue to Kindle'} →</button>
+        <button class="btn primary" id="starter-kindle">Preview my first issue →</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#starter-kindle').onclick=onboarding;
+  document.querySelector('#starter-kindle').onclick=async event=>{
+    const button=event.currentTarget,value=document.querySelector('#first-editor-guidance').value.trim();button.disabled=true;
+    try{if(value!==(state.settings.editorial_brief||''))state=await api('/settings',{method:'PATCH',body:{editorial_brief:value}});await firstIssuePage()}
+    catch(err){button.disabled=false;toast(err.message)}
+  };
   document.querySelector('#starter-another').onclick=starterPicker;
   wireSourceReviews(app);
 }
 
+let reviewedFirstIssue=null,firstIssuePoll=null;
+function stopFirstIssuePoll(){if(firstIssuePoll){clearTimeout(firstIssuePoll);firstIssuePoll=null}}
+async function firstIssuePage(refresh=false){
+  stopFirstIssuePoll();
+  app.innerHTML=shell(`<section class="first-issue-page onboarding-page"><div class="editorial-label">Your first issue</div><h1>Preparing your issue.</h1><p class="editorial-copy" role="status">Collecting and formatting articles from your sources. This may take several minutes.</p><button class="btn" id="issue-back">Back to sources</button></section>`,'<button class="btn small-btn" id="sign-out">Sign out</button>');
+  document.querySelector('#sign-out').onclick=signOut;document.querySelector('#issue-back').onclick=()=>{stopFirstIssuePoll();starterReady()};
+  try{
+    let response=refresh?await api('/first-issue/prepare',{method:'POST',body:{refresh:true}}):await api('/first-issue/preview');
+    if(!response.preview)response=await api('/first-issue/prepare',{method:'POST',body:{}});
+    if(!document.querySelector('.first-issue-page'))return;
+    showFirstIssue(response.preview);
+  }catch(err){if(document.querySelector('.first-issue-page'))showFirstIssue({status:'failed',error:err.message})}
+}
+function showFirstIssue(preview){
+  reviewedFirstIssue=preview.status==='ready'?preview:null;
+  const working=['queued','running'].includes(preview.status);
+  const ready=preview.status==='ready';
+  const title=ready?'Review your first issue.':working?'Preparing your issue.':preview.status==='empty'?'No recent articles found.':preview.status==='expired'?'Your prepared issue expired.':preview.status==='stale'?'Your reading changed.':'We could not prepare this issue.';
+  const groups=ready?(preview.groups||[]):[];
+  app.innerHTML=shell(`<section class="first-issue-page onboarding-page">
+    <div class="editorial-label">Your first issue · ${ready?'Review':'Preparation'}</div><h1>${title}</h1>
+    <p class="editorial-copy" role="status">${ready?'This is the prepared issue you can send to Kindle. Review the selected articles and read any of them before continuing. Sending uses this saved issue.':working?'Collecting and formatting articles from your sources. This may take several minutes.':preview.status==='empty'?'Try adding more sources or preparing again later.':preview.status==='stale'?'Rebuild the issue to include your latest source, article, or editor changes.':esc(preview.error||'Try again or review your sources.')}</p>
+    ${ready?`<p class="technical-note">${preview.article_count??groups.reduce((n,g)=>n+g.items.length,0)} articles${preview.estimated_reading_minutes?` · About ${preview.estimated_reading_minutes} minutes of reading. An estimate, not a limit.`:''}</p>`:''}
+    ${ready&&preview.introduction?`<div class="first-issue-intro"><div class="micro-label">From your editor</div><p>${esc(preview.introduction)}</p></div>`:''}
+    ${ready?groups.map(group=>`<section class="first-issue-group"><h2>${esc(group.name)}</h2>${group.items.map(item=>`<article class="first-issue-item"><h3>${esc(item.title)}</h3>${item.source?`<div class="technical-note">${esc(item.source)}</div>`:''}${item.excerpt?`<p>${esc(item.excerpt)}</p>`:''}${(item.warnings||[]).map(w=>`<p class="notice info">${esc(w)}</p>`).join('')}<button class="btn small-btn read-first-article" data-group="${item.groupIndex}" data-index="${item.index}">Read article →</button></article>`).join('')}</section>`).join(''):''}
+    ${ready&&(preview.issues||[]).length?`<div class="notice info">${preview.issues.map(esc).join('<br>')}</div>`:''}
+    <div class="ready-actions">${ready?'<button class="btn primary" id="issue-continue">Continue to Kindle →</button>':''}${!working?'<button class="btn" id="issue-rebuild">Rebuild issue</button>':''}<button class="btn" id="issue-sources">Review sources</button></div>
+  </section>`,'<button class="btn small-btn" id="sign-out">Sign out</button>');
+  document.querySelector('#sign-out').onclick=signOut;
+  document.querySelector('#issue-sources').onclick=()=>{stopFirstIssuePoll();starterReady()};
+  if(ready){document.querySelector('#issue-continue').onclick=onboarding;document.querySelectorAll('.read-first-article').forEach(button=>button.onclick=()=>readFirstArticle(preview.id,button.dataset.group,button.dataset.index))}
+  if(!working)document.querySelector('#issue-rebuild').onclick=()=>firstIssuePage(true);
+  if(working)firstIssuePoll=setTimeout(async()=>{try{const data=await api('/first-issue/preview');if(document.querySelector('.first-issue-page'))showFirstIssue(data.preview||{status:'failed',error:'Issue preparation was lost.'})}catch(err){if(document.querySelector('.first-issue-page'))showFirstIssue({status:'failed',error:err.message})}},4000);
+}
+async function readFirstArticle(jobId,group,index){
+  const version=openModal('<h2>Loading article…</h2>');
+  try{
+    const article=await api(`/first-issue/article/${jobId}/${group}/${index}`);
+    if(version!==modalVersion)return;
+    openModal(`<div class="row"><h2>${esc(article.title)}</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="small muted">Prepared article text. Images and Kindle page layout are not shown here.</p>${article.url?`<p class="small"><a href="${esc(article.url)}" target="_blank" rel="noopener noreferrer">Original article ↗</a></p>`:''}<iframe class="first-issue-reader" title="${esc(article.title)}" sandbox="" referrerpolicy="no-referrer"></iframe>`,'flow');
+    document.querySelector('#close-modal').onclick=closeModal;
+    const frame=document.querySelector('.first-issue-reader');frame.srcdoc=`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'">${(article.body||'<p>No article text was available.</p>').replace(/<img\b[^>]*>/gi,'')}`;
+  }catch(err){if(version===modalVersion){closeModal();toast(err.message)}}
+}
+
 function onboarding(){
+  if(!reviewedFirstIssue){firstIssuePage();return}
   const settings=state.settings||{};
   const timezone=settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
   app.innerHTML=shell(`
@@ -328,16 +409,16 @@ function onboarding(){
       </div>
 
       <div class="setup-actions">
-        <button class="btn primary" id="finish-setup">Save & queue my first issue →</button>
+        <button class="btn primary" id="finish-setup">Send this reviewed issue →</button>
         <button class="btn" id="save-kindle-later">Save without sending</button>
-        <button class="btn" id="back-to-paper">Back to sources</button>
+        <button class="btn" id="back-to-paper">Back to issue</button>
         <button class="btn" id="finish-later">Set up Kindle later</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
 
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#back-to-paper').onclick=starterReady;
+  document.querySelector('#back-to-paper').onclick=()=>showFirstIssue(reviewedFirstIssue);
   document.querySelector('#finish-later').onclick=dashboard;
   document.querySelector('#copy-sender').onclick=async()=>{await navigator.clipboard.writeText(SENDER);toast('Sender address copied')};
   document.querySelector('#save-kindle-later').onclick=async()=>{
@@ -355,9 +436,9 @@ function onboarding(){
     const button=document.querySelector('#finish-setup');button.disabled=true;button.textContent='Saving…';
     try{
       state=await api('/settings',{method:'PATCH',body:{kindle_email:kindle,delivery_time:delivery,timezone:tz,paused:true}});
-      const result=await api('/send-now',{method:'POST',body:{request_id:crypto.randomUUID()}});
+      const result=await api('/first-issue/send',{method:'POST',body:{job_id:reviewedFirstIssue.id}});
       state.jobs=[result.job,...(state.jobs||[]).filter(j=>j.id!==result.job.id)];void watchJob(result.job.id);firstRunDeliveryChoice();
-    }catch(err){button.disabled=false;button.textContent='Save & queue my first issue →';toast(err.message)}
+    }catch(err){button.disabled=false;button.textContent='Send this reviewed issue →';toast(err.message)}
   };
 }
 
@@ -458,6 +539,7 @@ function dashboard(){
           `}
         </div>
         <div class="issue-status" role="status">${esc(latestRunText(latestJob))}</div>
+        ${issueSupplyText(latestJob)?`<p class="small muted">${esc(issueSupplyText(latestJob))}</p>`:''}
         <div class="issue-reading">
           <button class="reading-action" id="one-time-send">
             <span class="reading-copy">
@@ -519,7 +601,7 @@ function wireDashboard(){
   document.querySelector('#delivery-history').onclick=historyModal;
   const preview=document.querySelector('#preview');if(preview)preview.onclick=previewModal;
   const deliveryMenu=document.querySelector('#delivery-menu');if(deliveryMenu)deliveryMenu.onclick=deliveryMenuModal;
-  const connectKindle=document.querySelector('#connect-kindle');if(connectKindle)connectKindle.onclick=()=>firstRunJob()?firstRunDeliveryChoice():onboarding();
+  const connectKindle=document.querySelector('#connect-kindle');if(connectKindle)connectKindle.onclick=()=>firstRunJob()?firstRunDeliveryChoice():firstIssuePage();
 }
 
 
@@ -605,7 +687,7 @@ function accountMenuModal(){
       <button class="menu-action" id="account-sign-out">Sign out</button>
     </div>`);
   document.querySelector('#close-modal').onclick=closeModal;
-  document.querySelector('#account-kindle').onclick=()=>{if(state.settings.onboarding_complete)kindleManageModal();else{closeModal();onboarding()}};
+  document.querySelector('#account-kindle').onclick=()=>{if(state.settings.onboarding_complete)kindleManageModal();else{closeModal();firstIssuePage()}};
   document.querySelector('#account-system-health').onclick=()=>{closeModal();systemHealthPage()};
   document.querySelector('#account-sign-out').onclick=()=>{closeModal();signOut()};
 }
@@ -925,7 +1007,7 @@ async function historyModal(){
   document.querySelector('#close-modal').onclick=closeModal;
   try{state=await api('/me')}catch(err){if(version===modalVersion)toast(err.message)}
   if(version!==modalVersion)return;
-  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
+  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.result?.edition_title||job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${issueSupplyDetails(job)}${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
   document.querySelector('#close-modal').onclick=closeModal;document.querySelector('#refresh-history').onclick=historyModal;
   modal.querySelectorAll('.resend-packet').forEach(button=>button.onclick=()=>{const job=state.jobs.find(j=>j.id===button.dataset.id);oneTimeEditionModal({name:job.packet_name,urls:job.article_urls.join('\n'),request_id:crypto.randomUUID()})});
 }
@@ -933,8 +1015,7 @@ function render(){
   if(state?.settings?.onboarding_complete){dashboard();const active=(state.jobs||[]).find(j=>['queued','running'].includes(j.status));if(active)void watchJob(active.id);return}
   if(feedCount()===0)return starterPicker();
   if(firstRunJob()){dashboard();firstRunDeliveryChoice();return}
-  if(state.settings.kindle_email)return dashboard();
-  return starterReady();
+  return firstIssuePage();
 }
 
 function sessionUnavailable(){
