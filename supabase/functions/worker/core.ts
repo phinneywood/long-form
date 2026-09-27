@@ -693,7 +693,9 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
         const frozen = await admin.from("delivery_outbox").insert({ job_id: job.id, payload });
         if (frozen.error) throw frozen.error;
       }
-      const ready = await admin.from("digest_jobs").update({ status: "ready", finished_at: new Date().toISOString(), error: null }).eq("id", job.id);
+      const ready = await admin.from("digest_jobs").update({ status: "ready", finished_at: new Date().toISOString(), error: null,
+        result: { ...(job.result || {}), preview_review: { groups: payload.groups, issues: payload.issues } },
+      }).eq("id", job.id);
       if (ready.error) throw ready.error;
       logEvent("first_issue.ready", { job_id: job.id, user_id: job.user_id, sections: payload.groups.length, duration_ms: Math.round(performance.now() - started) });
       return { job: job.id, status: "ready" };

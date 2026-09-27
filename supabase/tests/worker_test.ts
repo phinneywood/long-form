@@ -114,12 +114,15 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       assert(first?.status === "ready" && job.status === "ready");
       assert(sends === 0 && articleDeliveryWrites === 0, "Preparing a preview must not send or count as delivered");
       assert(outbox?.payload?.email?.to?.length === 0 && outbox.payload.email.attachments.length === 1);
+      assert(job.result.preview_review.groups.length === outbox.payload.groups.length, "Review must include the final packaged groups");
       previewAttachment = outbox.payload.email.attachments[0].content;
+      const fetchedBeforeSend=fetched.length;
       job.reason="manual";job.status="queued";
       outbox.payload.email.to=["reader@kindle.com"];
       await processJob(structuredClone(job));
       assert(Number(sends) === 1 && snapshots[0].includes("reader@kindle.com"));
       assert(outbox.payload.email.attachments[0].content === previewAttachment, "Sending must reuse frozen EPUB bytes");
+      assert(fetched.length === fetchedBeforeSend, "Sending a reviewed issue must not fetch or extract again");
     }
     return { initial, first, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests, previewAttachment };
   } finally { globalThis.fetch = original; }

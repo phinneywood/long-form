@@ -326,9 +326,9 @@ async function readFirstArticle(jobId,group,index){
   try{
     const article=await api(`/first-issue/article/${jobId}/${group}/${index}`);
     if(version!==modalVersion)return;
-    openModal(`<div class="row"><h2>${esc(article.title)}</h2><button class="btn small-btn" id="close-modal">Close</button></div>${article.url?`<p class="small"><a href="${esc(article.url)}" target="_blank" rel="noopener noreferrer">Original article ↗</a></p>`:''}<iframe class="first-issue-reader" title="${esc(article.title)}" sandbox="" referrerpolicy="no-referrer"></iframe>`,'flow');
+    openModal(`<div class="row"><h2>${esc(article.title)}</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="small muted">Prepared article text. Images and Kindle page layout are not shown here.</p>${article.url?`<p class="small"><a href="${esc(article.url)}" target="_blank" rel="noopener noreferrer">Original article ↗</a></p>`:''}<iframe class="first-issue-reader" title="${esc(article.title)}" sandbox="" referrerpolicy="no-referrer"></iframe>`,'flow');
     document.querySelector('#close-modal').onclick=closeModal;
-    const frame=document.querySelector('.first-issue-reader');frame.srcdoc=`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:">${article.body||'<p>No article text was available.</p>'}`;
+    const frame=document.querySelector('.first-issue-reader');frame.srcdoc=`<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'">${(article.body||'<p>No article text was available.</p>').replace(/<img\b[^>]*>/gi,'')}`;
   }catch(err){if(version===modalVersion){closeModal();toast(err.message)}}
 }
 

@@ -87,12 +87,13 @@ export function firstIssueSummary(job:any){
   const groups=manifest?.groups||[];
   const selected=manifest?.pendingItems?.length?[...groups,{section:{name:"Saved articles"},items:manifest.pendingItems}]:groups;
   const articles=selected.flatMap((group:any)=>group.items||[]);
+  const review=job.result?.preview_review;
   const words=articles.reduce((sum:number,item:any)=>sum+String(item.body||"").replace(/<[^>]*>/g," ").trim().split(/\s+/).filter(Boolean).length,0);
   return {id:job.id,status:job.status,error:job.error||null,created_at:job.created_at,
     article_count:job.status==="ready"?articles.length:0,estimated_reading_minutes:job.status==="ready"?Math.max(1,Math.ceil(words/225)):null,
     introduction:job.status==="ready"?manifest?.introduction||null:null,
-    issues:job.status==="ready"?manifest?.issues||[]:[],
-    groups:job.status==="ready"?selected.map((group:any,groupIndex:number)=>({
+    issues:job.status==="ready"?review?.issues||manifest?.issues||[]:[],
+    groups:job.status==="ready"?(review?.groups||selected).map((group:any,groupIndex:number)=>({
       name:group.section?.name||"Reading",items:(group.items||[]).map((item:any,index:number)=>({
         groupIndex,index,title:item.title||"Untitled",source:item.source||item.feed_name||item.source_name||null,
         url:item.url,excerpt:item.excerpt||null,warnings:item.warnings||[]
