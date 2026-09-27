@@ -1,4 +1,5 @@
 import ipaddr from "npm:ipaddr.js@2.2.0";
+import { PublicHttpError, retryAfterMillis, retryFeedRead } from "./network-retry.ts";
 
 // Allow only globally routable unicast addresses, including embedded IPv4.
 export function isPublicAddress(value: string): boolean {
@@ -70,8 +71,9 @@ export async function fetchPublic(input: string, options: { accept: string; maxB
         continue;
       }
       if (!response.ok) {
+        const retryAfter = retryAfterMillis(response.headers.get("retry-after"));
         await response.body?.cancel();
-        throw new Error(`The publisher returned HTTP ${response.status}.`);
+        throw new PublicHttpError(response.status, retryAfter);
       }
       return { response, bytes: await readLimited(response, options.maxBytes, controller.signal), url: url.toString() };
     }
@@ -82,6 +84,12 @@ export async function fetchPublic(input: string, options: { accept: string; maxB
 }
 
 export async function fetchPublicText(input: string, accept: string, maxBytes: number, deadline?: number) {
-  const fetched = await fetchPublic(input, { accept, maxBytes, deadline });
-  return { text: new TextDecoder().decode(fetched.bytes), url: fetched.url, response: fetched.response };
+  const isFeed = /application\/(?:rss|atom)\+xml/i.test(accept);
+  const readDeadline = Math.min(deadline ?? Infinity, Date.now() + 12_000);
+  let retries = 0;
+  const read = () => fetchPublic(input, { accept, maxBytes, deadline: readDeadline, timeoutMs: isFeed ? 6000 : 12_000 });
+  const fetched = isFeed
+    ? await retryFeedRead(read, { deadline: readDeadline, onRetry: () => { retries++; } })
+    : await read();
+  return { text: new TextDecoder().decode(fetched.bytes), url: fetched.url, response: fetched.response, retries };
 }
