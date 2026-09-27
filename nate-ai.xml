@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss version="2.0">
+  <channel>
+    <title>Silver Bulletin — AI+</title>
+    <link>https://www.natesilver.net/t/ai</link>
+    <description>Public posts explicitly tagged AI by Silver Bulletin.</description>
+    <language>en</language>
+    <generator>Long Form scoped feed</generator>
+    <lastBuildDate>Sun, 27 Sep 2026 12:56:05 +0000</lastBuildDate>
+    <item>
+      <title>A supermajority wants to slow AI down</title>
+      <link>https://www.natesilver.net/p/a-supermajority-wants-to-slow-ai</link>
+      <guid isPermaLink="true">https://www.natesilver.net/p/a-supermajority-wants-to-slow-ai</guid>
+      <pubDate>Thu, 17 Sep 2026 14:55:14 GMT</pubDate>
+      <description>Still Counting EP2 is out.</description>
+    </item>
+    <item>
+      <title>We’re not ready for superpersistent AI</title>
+      <link>https://www.natesilver.net/p/were-not-ready-for-superpersistent</link>
+      <guid isPermaLink="true">https://www.natesilver.net/p/were-not-ready-for-superpersistent</guid>
+      <pubDate>Tue, 15 Sep 2026 20:06:44 GMT</pubDate>
+      <description>Intelligence isn&amp;#8217;t the only thing to worry about. What happens when AI just won&amp;#8217;t quit?</description>
+    </item>
+  </channel>
+</rss>
