@@ -8,11 +8,12 @@ Deno.env.set("OPENAI_API_KEY", "test-only-key");
 const { processJob, handleWorkerRequest } = await import("../functions/worker/core.ts");
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 
-async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified") {
+async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview") {
   const original = globalThis.fetch;
   const job: any = { id: "job-1", user_id: "user-1", status: "queued", attempts: mode === "failed" ? 2 : 0, reason: "manual", created_at: new Date().toISOString(), lookback_hours: 168 };
   if(mode === "scheduled" || mode === "rescheduled")Object.assign(job,{reason:"scheduled",section_id:"section-1",schedule_version:1,lookback_hours:192});
   if(mode === "test")Object.assign(job,{reason:"test",lookback_hours:168});
+  if(mode === "first_run_preview")Object.assign(job,{reason:"first_run_preview"});
   let outbox: any = null, sends = 0, failFinalUpdate = mode === "retry", failOutboxInsert = mode === "prepare_retry";
   const feedUpdates: any[] = [];
   const good = { id: "feed-1", user_id: job.user_id, section_id: "section-1", name: "Example", url: "https://8.8.8.8/feed" };
@@ -108,9 +109,31 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       assert(first?.status === "queued", JSON.stringify(first));
       await processJob(structuredClone(job));
     }
-    return { initial, first, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests };
+    let previewAttachment: string | null = null;
+    if(mode === "first_run_preview"){
+      assert(first?.status === "ready" && job.status === "ready");
+      assert(sends === 0 && articleDeliveryWrites === 0, "Preparing a preview must not send or count as delivered");
+      assert(outbox?.payload?.email?.to?.length === 0 && outbox.payload.email.attachments.length === 1);
+      assert(job.result.preview_review.groups.length === outbox.payload.groups.length, "Review must include the final packaged groups");
+      previewAttachment = outbox.payload.email.attachments[0].content;
+      const fetchedBeforeSend=fetched.length;
+      job.reason="manual";job.status="queued";
+      outbox.payload.email.to=["reader@kindle.com"];
+      await processJob(structuredClone(job));
+      assert(Number(sends) === 1 && snapshots[0].includes("reader@kindle.com"));
+      assert(outbox.payload.email.attachments[0].content === previewAttachment, "Sending must reuse frozen EPUB bytes");
+      assert(fetched.length === fetchedBeforeSend, "Sending a reviewed issue must not fetch or extract again");
+    }
+    return { initial, first, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests, previewAttachment };
   } finally { globalThis.fetch = original; }
 }
+
+Deno.test("first issue preparation freezes the EPUB without sending, then sends identical bytes once", async()=>{
+  const r=await scenario("first_run_preview");
+  assert(r.initial?.continuation === "frozen-manifest");
+  assert(r.sendsAfterInitial === 0 && r.manifestsAfterInitial === 1);
+  assert(r.sends === 1 && r.job.status === "sent");
+});
 
 Deno.test("worker distinguishes an empty edition from failed sources", async () => {
   const empty = await scenario("empty"), failed = await scenario("failed");

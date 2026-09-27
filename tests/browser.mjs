@@ -53,7 +53,9 @@ async function capture(name,width){
   if(e.closest('[hidden]')||e.closest('#app[inert]')||getComputedStyle(e).display==='none'||!e.getClientRects().length||e.classList.contains('skip-link'))return false;
   const r=e.getBoundingClientRect();return r.right>innerWidth+1||r.left<-1;
  }).map(e=>({tag:e.tagName,class:e.className,text:e.textContent.slice(0,65),width:e.getBoundingClientRect().width})));
- const violations=(await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}));
+ // The article frame deliberately blocks scripts. Axe injection into that
+ // sandbox stalls WebKit; verify its readable text and accessible name below.
+ const violations=(await new AxeBuilder({page}).exclude('.first-issue-reader').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}));
  results.push({name,width,overflow,violations});
  if(overflow.length||violations.length)failures.push({name,width,overflow,violations});
  if(await card.count()){
@@ -78,6 +80,8 @@ try{
    else if(endpoint==='/system')payload=health;
    else if(endpoint==='/discover')payload={feeds:[{title:'A discovered publication',url:'https://example.com/feed.xml'}]};
    else if(endpoint==='/one-time/preview')payload={name:'Weekend reading',items:reviewed};
+   else if(endpoint==='/first-issue/preview'||endpoint==='/first-issue/prepare')payload={preview:{id:'preview-1',status:'ready',introduction:'A few durable ideas connect the articles in this issue.',groups:[{name:'Ideas and attention',items:reviewed.slice(0,2).map((item,index)=>({groupIndex:0,index,title:item.title,source:item.source,url:item.url,excerpt:item.excerpt,warnings:[]}))}]}};
+   else if(endpoint.startsWith('/first-issue/article/'))payload={title:reviewed[0].title,url:reviewed[0].url,body:'<p>A complete article follows a patient line of inquiry through everyday life.</p>'};
    else if(endpoint==='/settings'&&method==='PATCH')payload.settings={...payload.settings,...route.request().postDataJSON()};
    else if(endpoint.startsWith('/feeds/')&&method==='PATCH'){const i=payload.sources.findIndex(s=>s.id===endpoint.split('/').at(-1));assert.ok(i>=0);payload.sources[i]={...payload.sources[i],...route.request().postDataJSON()};}
    await route.fulfill({contentType:'application/json',body:JSON.stringify(payload)});
@@ -110,7 +114,13 @@ try{
   await home();await page.evaluate(()=>{state.settings.onboarding_complete=false;state.sources=[];starterPicker();});await capture('starter-packs',width);
   await page.evaluate(()=>{state.sources=STARTER_EDITIONS[0].sources.slice(0,3).map((source,i)=>({...source,id:'starter-'+i,enabled:true}));starterReady();});await capture('starter-ready',width);
   await page.locator('.review-source').first().click();await capture('first-source-review',width);await page.locator('#close-modal').click();
-  await page.evaluate(()=>onboarding());await capture('onboarding',width);
+  await page.locator('#starter-kindle').click();await page.locator('#issue-continue').waitFor();await capture('first-issue',width);
+  await page.locator('.read-first-article').first().click();await page.locator('.first-issue-reader').waitFor();
+  assert.equal(await page.locator('.first-issue-reader').getAttribute('sandbox'),'');
+  assert.equal(await page.locator('.first-issue-reader').getAttribute('title'),reviewed[0].title);
+  assert.match(await page.frameLocator('.first-issue-reader').locator('body').innerText(),/A complete article follows/);
+  await capture('first-article',width);await page.locator('#close-modal').click();
+  await page.locator('#issue-continue').click();await capture('onboarding',width);
   await page.evaluate(()=>{state.settings.kindle_email='reader_sample@kindle.com';state.settings.paused=true;state.jobs=[{id:'first',reason:'manual',status:'queued'}];dashboard();firstRunDeliveryChoice();});await capture('first-delivery-choice',width);
   await home();await page.evaluate(()=>{state.sources=[];state.jobs=[];state.settings.editorial_brief='';state.settings.editorial_instructions='';dashboard();});await capture('empty-home',width);
   await home();await page.evaluate(()=>{state.settings.paused=true;dashboard();});await capture('paused-home',width);

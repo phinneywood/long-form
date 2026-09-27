@@ -642,6 +642,36 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
   };
 }
 
+async function prepareDeliveryPayload(job: any, deadline: number, previewOnly = false) {
+  const settingsResult = await admin.from("user_settings").select("*").eq("user_id", job.user_id).single();
+  if (settingsResult.error) throw settingsResult.error;
+  const settings = settingsResult.data;
+  if (job.reason === "scheduled" && (settings.paused || !settings.onboarding_complete || !settings.kindle_email)) {
+    return { email: { from: "Long Form <reader@antonioskilton.com>", to: [], subject: "", text: "", attachments: [] },
+      groups: [], feedCount: 0, issues: [], skipReason: "Skipped because daily delivery settings changed." };
+  }
+  if (!previewOnly && !settings?.kindle_email) throw new Error("No Send-to-Kindle email is configured.");
+  const now = new Date(job.created_at);
+  const timezone = settings.timezone || "UTC";
+  const displayDate = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: timezone }).format(now);
+  const filenameDate = localDateKey(timezone, now);
+  const prepared = job.reason === "one_time"
+    ? await buildOneTime(job, settings, now, displayDate, filenameDate, deadline)
+    : await buildRecurring(job, settings, now, displayDate, filenameDate, deadline);
+  if (!prepared.attachments.length && prepared.issues.length) throw new Error("No edition could be prepared. " + prepared.issues.join(" ").slice(0, 600));
+  checkAttachmentBudget(prepared.attachments);
+  return {
+    email: { from: "Long Form <reader@antonioskilton.com>", to: previewOnly ? [] : [settings.kindle_email], subject: prepared.subject, text: "Your Long Form edition is attached.", attachments: prepared.attachments },
+    groups: prepared.groups.map(group => ({ section: group.section, items: group.items.map(({ body: _body, assets: _assets, ...article }) => article) })),
+    feedCount: prepared.feedCount,
+    issues: prepared.issues,
+    editorial: (prepared as any).editorial || null,
+    qa: (prepared as any).qa || null,
+    media: (prepared as any).media || null,
+    pendingItems: (prepared as any).pendingItems || [],
+  };
+}
+
 export async function processJob(queuedJob: any, deadline = Date.now() + 90_000) {
   const started = performance.now();
   const claim = await admin.from("digest_jobs").update({ status: "running", started_at: new Date().toISOString(), attempts: queuedJob.attempts + 1, error: null }).eq("id", queuedJob.id).eq("status", "queued").select("*").maybeSingle();
@@ -649,37 +679,30 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
   const job = claim.data;
   try {
     logEvent("digest.started", { job_id: job.id, user_id: job.user_id, reason: job.reason, attempt: job.attempts });
+    if (job.reason === "first_run_preview") {
+      const existing = await admin.from("delivery_outbox").select("*").eq("job_id", job.id).maybeSingle();
+      if (existing.error) throw existing.error;
+      let payload = existing.data?.payload;
+      if (!payload) {
+        payload = await prepareDeliveryPayload(job, deadline, true);
+        if (!payload.email.attachments.length) {
+          const empty = await admin.from("digest_jobs").update({ status: "empty", finished_at: new Date().toISOString() }).eq("id", job.id);
+          if (empty.error) throw empty.error;
+          return { job: job.id, status: "empty" };
+        }
+        const frozen = await admin.from("delivery_outbox").insert({ job_id: job.id, payload });
+        if (frozen.error) throw frozen.error;
+      }
+      const ready = await admin.from("digest_jobs").update({ status: "ready", finished_at: new Date().toISOString(), error: null,
+        result: { ...(job.result || {}), preview_review: { groups: payload.groups, issues: payload.issues } },
+      }).eq("id", job.id);
+      if (ready.error) throw ready.error;
+      logEvent("first_issue.ready", { job_id: job.id, user_id: job.user_id, sections: payload.groups.length, duration_ms: Math.round(performance.now() - started) });
+      return { job: job.id, status: "ready" };
+    }
     const { build, providerId } = await dispatchPrepared({
       load: async () => { const r = await admin.from("delivery_outbox").select("*").eq("job_id", job.id).maybeSingle(); if (r.error) throw r.error; return r.data; },
-      prepare: async () => {
-        const settingsResult = await admin.from("user_settings").select("*").eq("user_id", job.user_id).single();
-        if (settingsResult.error) throw settingsResult.error;
-        const settings = settingsResult.data;
-        if (job.reason === "scheduled" && (settings.paused || !settings.onboarding_complete || !settings.kindle_email)) {
-          return { email: { from: "Long Form <reader@antonioskilton.com>", to: [], subject: "", text: "", attachments: [] },
-            groups: [], feedCount: 0, issues: [], skipReason: "Skipped because daily delivery settings changed." };
-        }
-        if (!settings?.kindle_email) throw new Error("No Send-to-Kindle email is configured.");
-        const now = new Date(job.created_at);
-        const timezone = settings.timezone || "UTC";
-        const displayDate = new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: timezone }).format(now);
-        const filenameDate = localDateKey(timezone, now);
-        const prepared = job.reason === "one_time"
-          ? await buildOneTime(job, settings, now, displayDate, filenameDate, deadline)
-          : await buildRecurring(job, settings, now, displayDate, filenameDate, deadline);
-        if (!prepared.attachments.length && prepared.issues.length) throw new Error("No edition could be prepared. " + prepared.issues.join(" ").slice(0, 600));
-        checkAttachmentBudget(prepared.attachments);
-        return {
-          email: { from: "Long Form <reader@antonioskilton.com>", to: [settings.kindle_email], subject: prepared.subject, text: "Your Long Form edition is attached.", attachments: prepared.attachments },
-          groups: prepared.groups.map(group => ({ section: group.section, items: group.items.map(({ body: _body, assets: _assets, ...article }) => article) })),
-          feedCount: prepared.feedCount,
-          issues: prepared.issues,
-          editorial: (prepared as any).editorial || null,
-          qa: (prepared as any).qa || null,
-          media: (prepared as any).media || null,
-          pendingItems: (prepared as any).pendingItems || [],
-        };
-      },
+      prepare: () => prepareDeliveryPayload(job, deadline),
       freeze: async payload => { const r = await admin.from("delivery_outbox").insert({ job_id: job.id, payload }).select("*").single(); if (r.error) throw r.error; return r.data; },
       markAttempt: async at => { const r = await admin.from("delivery_outbox").update({ first_send_at: at }).eq("job_id", job.id); if (r.error) throw r.error; },
       send: email => sendResend(email, job.id),

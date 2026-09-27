@@ -67,7 +67,7 @@ export async function dashboard(userId:string,email:string){
     admin.from("sections").select("*").eq("user_id",userId).is("archived_at",null).order("position").order("created_at"),
     admin.from("feeds").select("*").eq("user_id",userId).is("archived_at",null).order("created_at"),
     admin.from("digests").select("id,section_id,edition_name,status,article_count,error,created_at,sent_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(25),
-    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,article_urls,status,result,error,attempts,run_after,created_at,started_at,finished_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(15)
+    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,article_urls,status,result,error,attempts,run_after,created_at,started_at,finished_at").eq("user_id",userId).neq("reason","first_run_preview").order("created_at",{ascending:false}).limit(15)
   ]);
   if(s.error)throw s.error;if(se.error)throw se.error;if(fe.error)throw fe.error;if(di.error)throw di.error;if(jo.error)throw jo.error;
   const sources=fe.data||[];
@@ -78,16 +78,34 @@ export async function dashboard(userId:string,email:string){
     sources,
     sections,
     digests:di.data||[],
-    jobs:jo.data||[],
+    jobs:(jo.data||[]).map((j:any)=>({...j,result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
     sender_email:"reader@antonioskilton.com"
   };
+}
+export function firstIssueSummary(job:any){
+  const manifest=job.result?.preparation_manifest;
+  const groups=manifest?.groups||[];
+  const selected=manifest?.pendingItems?.length?[...groups,{section:{name:"Saved articles"},items:manifest.pendingItems}]:groups;
+  const articles=selected.flatMap((group:any)=>group.items||[]);
+  const review=job.result?.preview_review;
+  const words=articles.reduce((sum:number,item:any)=>sum+String(item.body||"").replace(/<[^>]*>/g," ").trim().split(/\s+/).filter(Boolean).length,0);
+  return {id:job.id,status:job.status,error:job.error||null,created_at:job.created_at,
+    article_count:job.status==="ready"?articles.length:0,estimated_reading_minutes:job.status==="ready"?Math.max(1,Math.ceil(words/225)):null,
+    introduction:job.status==="ready"?manifest?.introduction||null:null,
+    issues:job.status==="ready"?review?.issues||manifest?.issues||[]:[],
+    groups:job.status==="ready"?(review?.groups||selected).map((group:any,groupIndex:number)=>({
+      name:group.section?.name||"Reading",items:(group.items||[]).map((item:any,index:number)=>({
+        groupIndex,index,title:item.title||"Untitled",source:item.source||item.feed_name||item.source_name||null,
+        url:item.url,excerpt:item.excerpt||null,warnings:item.warnings||[]
+      }))
+    })):[]};
 }
 export async function systemHealth(userId:string){
   const since=new Date(Date.now()-24*3600_000).toISOString();
   const [settingsR,feedsR,jobsR,articlesR]=await Promise.all([
     admin.from("user_settings").select("paused,onboarding_complete,next_run_at,kindle_email").eq("user_id",userId).single(),
     admin.from("feeds").select("id,name,last_fetch_at,last_success_at,last_error,consecutive_failures,enabled").eq("user_id",userId).eq("enabled",true).is("archived_at",null).order("consecutive_failures",{ascending:false}),
-    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,status,result,error,created_at,started_at,finished_at").eq("user_id",userId).gte("created_at",since).order("created_at",{ascending:false}).limit(100),
+    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,status,result,error,created_at,started_at,finished_at").eq("user_id",userId).neq("reason","first_run_preview").gte("created_at",since).order("created_at",{ascending:false}).limit(100),
     admin.from("article_deliveries").select("id",{count:"exact",head:true}).eq("user_id",userId).gte("delivered_at",since)
   ]);
   if(settingsR.error)throw settingsR.error;if(feedsR.error)throw feedsR.error;if(jobsR.error)throw jobsR.error;if(articlesR.error)throw articlesR.error;
@@ -125,7 +143,7 @@ export async function systemHealth(userId:string){
       repeatedly_failing:repeatedFeeds.length
     },
     alerts,
-    recent_jobs:jobs.slice(0,12),
+    recent_jobs:jobs.slice(0,12).map((j:any)=>({...j,result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
     source_issues:failingFeeds.slice(0,20).map((f:any)=>({id:f.id,name:f.name,last_error:f.last_error,consecutive_failures:f.consecutive_failures||0,last_fetch_at:f.last_fetch_at,last_success_at:f.last_success_at}))
   };
 }
