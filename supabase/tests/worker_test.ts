@@ -23,6 +23,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
   let articleDeliveryReads = 0, articleDeliveryWrites = 0;
   const snapshots: string[] = [];
   const manifestWrites: any[] = [];
+  const continuations: string[] = [];
   const editorRequests: any[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init), url = new URL(req.url);
@@ -66,7 +67,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
         const body = "Substantial original reading text. ".repeat(24);
         return new Response(`<rss><channel>${Array.from({length:5},(_,i)=>`<item><title>Test article ${i+1}</title><link>https://8.8.8.8/article-${i+1}</link><content:encoded><![CDATA[<p>${body}</p><img src="https://8.8.8.8/test-${i+1}.png" alt="Test image ${i+1}">]]></content:encoded></item>`).join("")}</channel></rss>`);
       }
-      return new Response(`<rss><channel><item><title>Example article</title><link>https://8.8.8.8/article</link>${mode==='scheduled'?`<pubDate>${new Date(Date.now()-5*86400_000).toUTCString()}</pubDate>`:''}<content:encoded><![CDATA[<p>${"Substantial original reading text. ".repeat(24)}</p>]]></content:encoded></item></channel></rss>`);
+      return new Response(`<rss><channel><item><title>Example article</title><link>https://8.8.8.8/article</link>${mode==='scheduled'?`<pubDate>${new Date(Date.now()-5*86400_000).toUTCString()}</pubDate>`:''}<content:encoded><![CDATA[<p>${"Substantial original reading text. ".repeat(24)}</p>${["prepare_retry","first_run_preview"].includes(mode)?'<img src="https://8.8.8.8/checkpoint.png" alt="Checkpoint image">':''}]]></content:encoded></item></channel></rss>`);
     }
     assert(url.hostname === "database.example.invalid", "Unexpected network call " + url.hostname);
     if (url.pathname.includes("/rpc/kick_digest_worker")) return Response.json(1);
@@ -104,7 +105,11 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
     const sendsAfterInitial = sends;
     const manifestsAfterInitial = manifestWrites.length;
     let first = initial;
-    if (initial?.continuation === "frozen-manifest") first = await processJob(structuredClone(job));
+    for (let stage = 0; first?.continuation && stage < 3; stage++) {
+      continuations.push(first.continuation);
+      assert(job.attempts === (mode === "failed" ? 2 : 0), "Successful preparation stages must not consume failure retries");
+      first = await processJob(structuredClone(job));
+    }
     if (mode === "retry" || mode === "prepare_retry") {
       assert(first?.status === "queued", JSON.stringify(first));
       await processJob(structuredClone(job));
@@ -124,7 +129,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       assert(outbox.payload.email.attachments[0].content === previewAttachment, "Sending must reuse frozen EPUB bytes");
       assert(fetched.length === fetchedBeforeSend, "Sending a reviewed issue must not fetch or extract again");
     }
-    return { initial, first, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests, previewAttachment };
+    return { initial, first, continuations, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests, previewAttachment };
   } finally { globalThis.fetch = original; }
 }
 
@@ -133,6 +138,7 @@ Deno.test("first issue preparation freezes the EPUB without sending, then sends 
   assert(r.initial?.continuation === "frozen-manifest");
   assert(r.sendsAfterInitial === 0 && r.manifestsAfterInitial === 1);
   assert(r.sends === 1 && r.job.status === "sent");
+  assert(r.continuations.join(",") === "frozen-manifest,prepared-media", "Media preparation and packaging need separate invocations");
 });
 
 Deno.test("worker distinguishes an empty edition from failed sources", async () => {
@@ -171,9 +177,16 @@ Deno.test("retry reuses the frozen preparation manifest instead of rediscovering
   assert(result.job.status === "sent", JSON.stringify(result.first));
   assert(result.sends === 1, "the successful retry should submit exactly one email");
   assert(result.fetched.filter((path: string) => path === "/feed").length === 1, "feed discovery must not rerun after the manifest has been frozen");
-  assert(result.manifestWrites.length === 1, "the selected issue should be frozen exactly once across retries");
+  assert(result.manifestWrites.filter((m: any) => m.version === 2).length === 1, "the selected issue should be frozen exactly once across retries");
+  assert(result.manifestWrites.filter((m: any) => m.version === 3).length === 1, "prepared media should be checkpointed once and reused on retry");
   assert(result.manifestWrites[0].version === 2, "new recurring runs should freeze the v2 agentic manifest");
   assert(result.manifestWrites[0].groups[0].items.length === 1, "the frozen manifest should preserve the organized article set");
+  assert(result.fetched.filter(path => path === "/checkpoint.png").length === 1, "Packaging retries must reuse prepared images");
+  const media = result.manifestWrites.find((m: any) => m.version === 3);
+  assert(typeof media.groups[0].items[0].assets[0].bytes === "string", "Checkpoint media must be JSON-safe");
+  const zip = await JSZip.loadAsync(result.outbox.payload.email.attachments[0].content, {base64:true});
+  const embedded = await zip.file(`OEBPS/${media.groups[0].items[0].assets[0].href}`)!.async("uint8array");
+  assert(embedded[0] === 0x89 && embedded[1] === 0x50, "Image bytes must survive the database checkpoint");
 });
 
 Deno.test("scheduled issues ignore legacy section frequency and read all enabled sources",async()=>{
