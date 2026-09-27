@@ -611,16 +611,16 @@ function renderSystemHealth(h){
 
 function singleFeedModal(){
   openModal(`<div class="row"><div><div class="editorial-label">Add source</div><h2 class="mt-1">Add a single feed</h2></div><button class="btn small-btn" id="close-modal">Close</button></div>
-    <p class="muted small">Paste a publication's website or RSS address. Long Form will find the feed and add it to your source list.</p>
+    <p class="muted small">Paste a website or RSS address you already read. Long Form will validate the recurring feed before adding it.</p>
     <form id="single-feed-form">
       <div class="field"><label for="single-feed-url">Website or RSS feed</label><input id="single-feed-url" class="input" name="url" required placeholder="https://example.com"></div>
-      <button class="btn primary" id="single-feed-submit">Find & add feed →</button>
+      <button class="btn primary" id="single-feed-submit">Add source →</button>
     </form>`);
   document.querySelector('#close-modal').onclick=closeModal;
   document.querySelector('#single-feed-form').onsubmit=async e=>{
     e.preventDefault();
     const input=String(new FormData(e.currentTarget).get('url')||'').trim();
-    const button=document.querySelector('#single-feed-submit');button.disabled=true;button.textContent='Finding…';
+    const button=document.querySelector('#single-feed-submit');button.disabled=true;button.textContent='Checking…';
     try{
       const result=await api('/discover',{method:'POST',body:{url:input}});
       const feeds=result.feeds||[];
@@ -631,7 +631,7 @@ function singleFeedModal(){
       }
       chooseFeedModal(feeds);
     }catch(err){
-      button.disabled=false;button.textContent='Find & add feed →';toast(err.message);
+      button.disabled=false;button.textContent='Add source →';toast(err.message);
     }
   };
 }
