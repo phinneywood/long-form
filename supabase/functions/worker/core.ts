@@ -715,7 +715,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     }
     const persistentGroups = build.groups.filter((group: any) => Boolean(group.section?.id));
     const unsectionedItems = build.groups.filter((group: any) => !group.section?.id).flatMap((group: any) => group.items);
-    if (unsectionedItems.length) persistentGroups.push({ section: { id: null, name: "Unsectioned" }, items: unsectionedItems });
+    if (unsectionedItems.length) persistentGroups.push({ section: { id: null, name: build.email.subject || "Long Form" }, items: unsectionedItems });
     for (const group of persistentGroups) await digestForGroup(job, group, providerId);
 
     const total = build.groups.reduce((count: number, group: any) => count + group.items.length, 0);

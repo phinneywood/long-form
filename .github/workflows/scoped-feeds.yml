@@ -1,0 +1,49 @@
+name: Refresh scoped feeds
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/publish_nate_feed.py
+      - tests/test_nate_feed.py
+      - .github/workflows/scoped-feeds.yml
+permissions:
+  contents: read
+concurrency:
+  group: scoped-feed-refresh-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test scope and failure behavior
+        run: python -m unittest discover -s tests -p 'test_nate_feed.py'
+      - name: Load previously validated public entries
+        run: |
+          mkdir -p /tmp/scoped-feeds
+          if git ls-remote --exit-code --heads origin feed-data >/dev/null; then
+            git fetch origin feed-data:refs/remotes/origin/feed-data --depth=1
+            git show origin/feed-data:nate-ai.xml > /tmp/scoped-feeds/previous.xml
+          fi
+      - name: Refresh from public publisher metadata
+        run: python scripts/publish_nate_feed.py --output /tmp/scoped-feeds/nate-ai.xml --previous /tmp/scoped-feeds/previous.xml
+      - name: Publish isolated feed data branch
+        if: github.ref == 'refs/heads/main' && github.repository == 'phinneywood/long-form'
+        run: |
+          if git show-ref --verify --quiet refs/remotes/origin/feed-data; then
+            git checkout -B feed-data origin/feed-data
+          else
+            git checkout --orphan feed-data
+            git rm -rf .
+          fi
+          cp /tmp/scoped-feeds/nate-ai.xml /tmp/scoped-feeds/nate-ai-status.json .
+          git config user.name 'Long Form feed publisher'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nate-ai.xml nate-ai-status.json
+          git diff --cached --quiet || git commit -m 'Refresh verified AI-tagged public feed'
+          git push origin HEAD:feed-data
