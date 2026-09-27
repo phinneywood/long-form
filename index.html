@@ -134,6 +134,8 @@ function landing(error=''){
         <div class="auth-kicker">A PERSONAL DAILY PUBLICATION</div>
         <h1>Take back your attention.<br>Read something worth finishing.</h1>
         <div class="auth-lede">Your favorite reading, gathered into one Kindle issue. Long Form keeps the original writing intact and gives it a thoughtful editorial shape.</div>
+        <div class="auth-benefits"><span>Original articles from your sources</span><span>Organized into one issue by an AI editor</span><span>Delivered to your Kindle when you choose</span></div>
+        <button class="btn primary" id="read-sample">Read a sample issue →</button>
       </div>
 
       <section class="auth-form-section">
@@ -145,7 +147,7 @@ function landing(error=''){
           <div class="auth-form-copy">We'll send you a six-digit sign-in code. No password.</div>
           <div class="field"><label for="email">Email address</label><input id="email" class="input" name="email" type="email" autocomplete="email" required placeholder="you@example.com"></div>
           <div class="auth-form-actions"><button class="btn primary" id="login-submit">Send code</button></div>
-          <div class="auth-note">New here? Your verified email creates your account.</div>
+          <div class="auth-note">New here? Your verified email creates your account. You can add sources before connecting Kindle.</div>
         </form>
       </section>
     </section>`);
@@ -156,6 +158,19 @@ function landing(error=''){
     try{await api('/auth/request-code',{method:'POST',body:{email},auth:false});verify(email)}
     catch(err){landing(err.message)}
   };
+  document.querySelector('#read-sample').onclick=sampleIssue;
+}
+function sampleIssue(){
+  openModal(`<div class="row"><div><div class="editorial-label">A public example</div><h2 class="mt-1">A little more room to think</h2></div><button class="btn small-btn" id="close-modal">Close</button></div>
+    <p class="muted small">A short example of how an issue is presented. These are real, publicly available articles; your issue will use the sources you add.</p>
+    <div class="sample-note"><div class="editorial-label">From the editor</div><p>What we choose to notice shapes what we understand. This example moves from the history of distraction to the surprising patterns hidden in living things, with the original reporting ready for a longer read.</p></div>
+    <div class="editorial-label mt-5">In this example</div>
+    <div class="sample-article"><span class="technical-note">ATTENTION · AEON</span><h3>We’ve always been distracted, or at least worried that we are</h3><a href="https://aeon.co/essays/weve-always-been-distracted-or-at-least-worried-that-we-are" target="_blank" rel="noopener">Read the original at Aeon ↗</a></div>
+    <div class="sample-article"><span class="technical-note">NATURE · QUANTA MAGAZINE</span><h3>The Hidden Mathematical Dance Inside Plant Cells</h3><a href="https://www.quantamagazine.org/the-hidden-mathematical-dance-inside-plant-cells-20260504/" target="_blank" rel="noopener">Read the original at Quanta ↗</a></div>
+    <p class="muted small">The Kindle issue includes the extracted original articles when publishers allow it. This public example shows the editorial shape, not a generated issue or a guarantee that every source can be extracted.</p>
+    <button class="btn primary mt-3" id="sample-start">Create my issue →</button>`, 'flow');
+  document.querySelector('#close-modal').onclick=closeModal;
+  document.querySelector('#sample-start').onclick=()=>{closeModal(true);document.querySelector('#email')?.focus()};
 }
 function verify(email,error=''){
   app.innerHTML=shell(`
@@ -172,11 +187,16 @@ function verify(email,error=''){
         <form id="verify-form" class="auth-form">
           <div class="field"><label for="code">Verification code</label><input id="code" class="input" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required placeholder="123456"></div>
           ${error?`<div class="notice error">${esc(error)}</div>`:''}
-          <div class="auth-form-actions"><button class="btn primary">Continue →</button><button type="button" class="btn ghost" id="back-login">Use another email</button></div>
+          <div class="auth-form-actions"><button class="btn primary">Continue →</button><button type="button" class="btn ghost" id="resend-code">Send a new code</button><button type="button" class="btn ghost" id="back-login">Use another email</button></div>
         </form>
       </section>
     </section>`);
   document.querySelector('#back-login').onclick=()=>landing();
+  document.querySelector('#resend-code').onclick=async event=>{
+    const button=event.currentTarget;button.disabled=true;button.textContent='Sending…';
+    try{await api('/auth/request-code',{method:'POST',body:{email},auth:false});verify(email);toast('A new code is on its way')}
+    catch(err){button.disabled=false;button.textContent='Send a new code';toast(err.message)}
+  };
   document.querySelector('#verify-form').onsubmit=async e=>{
     e.preventDefault();
     try{
@@ -199,6 +219,7 @@ function allSources(){
   return (state?.sections||[]).flatMap(section=>section.feeds||[]);
 }
 function feedCount(){return allSources().length}
+function firstRunJob(){return !state?.settings?.onboarding_complete?(state?.jobs||[]).find(job=>job.reason==='manual'&&job.status!=='failed'):null}
 
 function starterPicker(){
   const sources=allSources();
@@ -246,8 +267,8 @@ function starterReady(){
     <section class="starter-ready onboarding-page">
       <div class="editorial-label">Your sources</div>
       <h1>You're all set.</h1>
-      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. You can always change these later.</div>
-      <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div></div><button class="btn small-btn review-source" data-id="${esc(feed.id)}">•••</button></div>`).join('')}</div>
+      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before connecting Kindle; you can edit or remove them here.</div>
+      <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div>${feed.last_error?`<div class="feed-error">Last check failed: ${esc(feed.last_error)}</div>`:''}</div><button class="btn small-btn review-source" data-id="${esc(feed.id)}" aria-label="Review ${esc(displayText(feed.name||feed.url))}">Review</button></div>`).join('')}</div>
       <div class="ready-actions">
         <button class="btn" id="starter-another">+ Add another source</button>
         <button class="btn primary" id="starter-kindle">Continue to Kindle →</button>
@@ -262,12 +283,12 @@ function starterReady(){
 
 function onboarding(){
   const settings=state.settings||{};
-  const timezone=Intl.DateTimeFormat().resolvedOptions().timeZone||settings.timezone||'UTC';
+  const timezone=settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
   app.innerHTML=shell(`
     <section class="setup-page">
       <div class="editorial-label">Final step</div>
       <h1>Send it to your Kindle.</h1>
-      <div class="editorial-copy">Amazon requires two addresses to be connected once. After that, Long Form can deliver your daily issue automatically.</div>
+      <div class="editorial-copy">Approve Long Form’s sender in Amazon and enter the address for the Kindle device or app where you want the issue. Long Form cannot check Amazon approval or confirm arrival.</div>
 
       <div class="setup-list">
         <div class="setup-row">
@@ -287,7 +308,7 @@ function onboarding(){
           <div class="setup-num">02</div>
           <div>
             <h3>Add your Kindle address</h3>
-            <p>On that same Amazon page, copy your <strong>Send-to-Kindle E-Mail</strong> address and paste it here.</p>
+            <p>On that same Amazon page, copy the <strong>Send-to-Kindle E-Mail</strong> address for your chosen device or app. This is different from your sign-in email.</p>
             <div class="mb-0 field"><label for="kindle-email">Send-to-Kindle address</label><input id="kindle-email" class="input" type="email" placeholder="yourname_123@kindle.com" value="${esc(settings.kindle_email||'')}"></div>
           </div>
         </div>
@@ -296,24 +317,26 @@ function onboarding(){
           <div class="setup-num">03</div>
           <div>
             <h3>Choose when your issue arrives</h3>
-            <p>Long Form sends one issue per day. Its editor creates the issue sections from that day's eligible articles.</p>
+            <p>If you opt into daily delivery after the first issue, this is when it will be scheduled. Daily delivery stays off until you choose it.</p>
             <div class="row wrap">
               <div class="form-short field"><label for="delivery-time">Time</label><input id="delivery-time" class="input" type="time" value="${esc((settings.delivery_time||'06:00').slice(0,5))}"></div>
-              <div class="form-wide field"><label for="timezone">Timezone</label><input id="timezone" class="input" value="${esc(timezone)}"></div>
+              <div class="form-wide field"><label for="timezone">Timezone</label><input id="timezone" class="input" value="${esc(timezone)}"><div class="technical-note">Use an IANA timezone, such as America/Los_Angeles.</div></div>
             </div>
           </div>
         </div>
       </div>
 
       <div class="setup-actions">
-        <button class="btn primary" id="finish-setup">Save & send my first issue →</button>
-        <button class="btn" id="back-to-paper">Back to my paper</button>
+        <button class="btn primary" id="finish-setup">Save & queue my first issue →</button>
+        <button class="btn" id="back-to-paper">Back to sources</button>
+        <button class="btn" id="finish-later">Set up Kindle later</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
 
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#back-to-paper').onclick=()=>dashboard();
+  document.querySelector('#back-to-paper').onclick=starterReady;
+  document.querySelector('#finish-later').onclick=dashboard;
   document.querySelector('#copy-sender').onclick=async()=>{await navigator.clipboard.writeText(SENDER);toast('Sender address copied')};
   document.querySelector('#finish-setup').onclick=async()=>{
     const kindle=document.querySelector('#kindle-email').value.trim(),tz=document.querySelector('#timezone').value.trim(),delivery=document.querySelector('#delivery-time').value;
@@ -323,12 +346,14 @@ function onboarding(){
       state=await api('/settings',{method:'PATCH',body:{kindle_email:kindle,delivery_time:delivery,timezone:tz,paused:true}});
       const result=await api('/send-now',{method:'POST',body:{request_id:crypto.randomUUID()}});
       state.jobs=[result.job,...(state.jobs||[]).filter(j=>j.id!==result.job.id)];void watchJob(result.job.id);firstRunDeliveryChoice();
-    }catch(err){button.disabled=false;button.textContent='Save & send my first issue →';toast(err.message)}
+    }catch(err){button.disabled=false;button.textContent='Save & queue my first issue →';toast(err.message)}
   };
 }
 
 function firstRunDeliveryChoice(){
-  openModal(`<div class="row"><div><div class="editorial-label">One last choice</div><h2>Would you like daily issues?</h2></div><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Your first issue has been queued. Choose whether Long Form should keep sending new issues automatically.</p><form id="first-cadence"><label class="delivery-choice"><input type="radio" name="cadence" value="daily"> <span><strong>Yes, send daily issues</strong><small>Use the delivery time you chose above.</small></span></label><label class="delivery-choice"><input type="radio" name="cadence" value="once"> <span><strong>Just this issue for now</strong><small>You can turn daily delivery on later.</small></span></label><button class="btn primary mt-4" id="finish-first-run" disabled>Finish setup →</button></form>`);
+  const s=state.settings,job=firstRunJob();
+  const issueStatus=job?.status==='sent'||job?.status==='partial'?'The email provider accepted your first issue. Amazon has not confirmed delivery.':job?.status==='empty'?'The first run found no new articles to send.': 'Your first issue has been queued. Preparation and delivery may take a few minutes.';
+  openModal(`<div class="row"><div><div class="editorial-label">One last choice</div><h2>Would you like daily issues?</h2></div><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">${issueStatus} Choose whether Long Form should keep sending new issues automatically.</p><form id="first-cadence"><label class="delivery-choice"><input type="radio" name="cadence" value="daily"> <span><strong>Yes, send daily issues</strong><small>Daily at ${esc((s.delivery_time||'06:00').slice(0,5))} · ${esc(s.timezone||'UTC')}. You can change this later.</small></span></label><label class="delivery-choice"><input type="radio" name="cadence" value="once"> <span><strong>Just this issue for now</strong><small>Daily delivery stays off. You can turn it on later.</small></span></label><button class="btn primary mt-4" id="finish-first-run" disabled>Finish setup →</button></form>`);
   document.querySelector('#close-modal').onclick=closeModal;
   const form=document.querySelector('#first-cadence'),button=document.querySelector('#finish-first-run');form.querySelectorAll('input').forEach(i=>i.onchange=()=>button.disabled=false);
   form.onsubmit=async e=>{e.preventDefault();const cadence=new FormData(form).get('cadence');button.disabled=true;try{state=await api('/settings',{method:'PATCH',body:{paused:cadence!=='daily',onboarding_complete:true}});closeModal(true);dashboard();toast(cadence==='daily'?'Daily delivery is on':'Setup complete — daily delivery is off')}catch(err){button.disabled=false;toast(err.message)}};
@@ -369,8 +394,8 @@ function feedRow(feed){
 }
 
 function nextIssueDelivery(){
-  if(state.settings.paused)return 'Delivery paused';
   if(!state.settings.onboarding_complete||!state.settings.kindle_email)return 'Connect your Kindle';
+  if(state.settings.paused)return 'Delivery paused';
   return state.settings.next_run_at?new Intl.DateTimeFormat('en-US',{timeZone:state.settings.timezone,weekday:'long',hour:'numeric',minute:'2-digit'}).format(new Date(state.settings.next_run_at)):'Not scheduled';
 }
 
@@ -387,7 +412,7 @@ function dashboard(){
   const problemFeeds=sources.filter(sourceNeedsAttention);
   const latestJob=(state.jobs||[])[0];
   const busy=(state.jobs||[]).some(job=>job.reason!=='one_time'&&['queued','running'].includes(job.status));
-  const issueState=settings.paused?'Paused':(!settings.onboarding_complete||!settings.kindle_email?'Setup needed':'Scheduled');
+  const issueState=!settings.onboarding_complete||!settings.kindle_email?'Setup needed':settings.paused?'Paused':'Scheduled';
   const firstProblem=problemFeeds[0];
   const editorialBrief=String(settings.editorial_brief||'').trim();
   const editorialInstructions=String(settings.editorial_instructions||'').trim();
@@ -403,14 +428,14 @@ function dashboard(){
           <span class="issue-state ${settings.paused?'paused':''}">${esc(issueState)}</span>
         </div>
         <h1 class="issue-time" id="next-issue-heading">${esc(nextIssueDelivery())}</h1>
-        <div class="issue-schedule">Daily at ${esc((settings.delivery_time||'06:00').slice(0,5))} · ${esc(settings.timezone)}</div>
+        <div class="issue-schedule">${settings.onboarding_complete?`Daily at ${esc((settings.delivery_time||'06:00').slice(0,5))} · ${esc(settings.timezone)}`:'Daily delivery is off until you choose it.'}</div>
         <div class="issue-actions">
           ${settings.onboarding_complete?`
             <button class="btn primary" id="send-now" ${busy?'disabled':''}>Send now</button>
             <button class="btn" id="preview">Browse articles</button>
             <button class="btn icon-button" id="delivery-menu" aria-label="More delivery options">•••</button>
           `:`
-            <button class="btn primary" id="connect-kindle">Connect Kindle</button>
+            <button class="btn primary" id="connect-kindle">${firstRunJob()?'Finish setup':'Connect Kindle'}</button>
             <button class="btn" id="preview">Browse articles</button>
           `}
         </div>
@@ -476,7 +501,7 @@ function wireDashboard(){
   document.querySelector('#delivery-history').onclick=historyModal;
   const preview=document.querySelector('#preview');if(preview)preview.onclick=previewModal;
   const deliveryMenu=document.querySelector('#delivery-menu');if(deliveryMenu)deliveryMenu.onclick=deliveryMenuModal;
-  const connectKindle=document.querySelector('#connect-kindle');if(connectKindle)connectKindle.onclick=onboarding;
+  const connectKindle=document.querySelector('#connect-kindle');if(connectKindle)connectKindle.onclick=()=>firstRunJob()?firstRunDeliveryChoice():onboarding();
 }
 
 
@@ -887,9 +912,9 @@ async function historyModal(){
 }
 function render(){
   if(state?.settings?.onboarding_complete){dashboard();const active=(state.jobs||[]).find(j=>['queued','running'].includes(j.status));if(active)void watchJob(active.id);return}
-  if(feedCount()===0&&(localStorage.getItem(SKIP_STARTERS_KEY)||localStorage.getItem(LEGACY_SKIP_STARTERS_KEY))!=='1')return starterPicker();
-  if(feedCount()===0)return dashboard();
-  return onboarding();
+  if(feedCount()===0)return starterPicker();
+  if(firstRunJob()){dashboard();firstRunDeliveryChoice();return}
+  return starterReady();
 }
 
 function sessionUnavailable(){
