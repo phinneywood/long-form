@@ -36,6 +36,11 @@ test('unfinished account resumes at source review, and a queued issue resumes at
   assert.ok(result.sourceReview&&result.backAtReview);assert.match(result.reviewLabel,/Review Example source/);assert.equal(result.zone,'UTC');assert.match(result.choice,/Daily at 06:00 · UTC/);assert.match(result.choice,/daily delivery stays off/i);assert.equal(result.button,'Finish setup');
 });
 
+test('reviewing a source during onboarding returns to source review',async()=>{
+  const result=await run(`state.settings.onboarding_complete=false;starterReady();document.querySelector('.review-source').click();const modalText=modal.textContent,stillReview=!!document.querySelector('#starter-kindle');document.querySelector('#close-modal').click();return {modalText,stillReview,afterClose:!!document.querySelector('#starter-kindle')}`);
+  assert.match(result.modalText,/Edit source/);assert.ok(result.stillReview&&result.afterClose);
+});
+
 test('opening and reloading a saved session restores the dashboard without a code',async()=>{
   const result=await run(`localStorage.morningReaderToken=token;let calls=0;fetch=async()=>{calls++;return new Response(JSON.stringify(state),{status:200})};await startApp();await startApp();return {calls,saved:localStorage.morningReaderToken,dashboard:!!document.querySelector('#one-time-send')}`);
   assert.equal(result.calls,2);assert.equal(result.saved,'test-token');assert.ok(result.dashboard);
