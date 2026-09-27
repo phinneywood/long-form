@@ -36,6 +36,16 @@ test('unfinished account resumes at source review, and a queued issue resumes at
   assert.ok(result.sourceReview&&result.backAtReview);assert.match(result.reviewLabel,/Review Example source/);assert.equal(result.zone,'UTC');assert.match(result.choice,/Daily at 06:00 · UTC/);assert.match(result.choice,/daily delivery stays off/i);assert.equal(result.button,'Finish setup');
 });
 
+test('Kindle details can be saved without queuing a first issue or enabling daily delivery',async()=>{
+  const result=await run(`state.settings.onboarding_complete=false;state.settings.kindle_email='';onboarding();document.querySelector('#kindle-email').value='reader@kindle.com';let calls=[];api=async(path,options)=>{calls.push({path,body:options.body});state.settings={...state.settings,...options.body};return state};await document.querySelector('#save-kindle-later').click();const home=app.textContent;render();return {calls,home,review:!!document.querySelector('#starter-kindle'),saved:state.settings.kindle_email,paused:state.settings.paused}`);
+  assert.equal(result.calls.length,1);assert.equal(result.calls[0].path,'/settings');assert.equal(result.calls[0].body.paused,true);assert.equal(result.saved,'reader@kindle.com');assert.ok(result.paused&&result.review);assert.match(result.home,/First issue needed/);assert.match(result.home,/Send your first issue/);
+});
+
+test('queued first issue asks for the daily choice instead of claiming Kindle setup is needed',async()=>{
+  const result=await run(`state.settings.onboarding_complete=false;state.settings.kindle_email='reader@kindle.com';state.jobs=[{id:'j1',reason:'manual',status:'queued'}];dashboard();return {heading:document.querySelector('#next-issue-heading').textContent,status:document.querySelector('.issue-state').textContent,action:document.querySelector('#connect-kindle').textContent}`);
+  assert.equal(result.heading,'Choose daily delivery');assert.equal(result.status,'Choice needed');assert.equal(result.action,'Finish setup');
+});
+
 test('reviewing a source during onboarding returns to source review',async()=>{
   const result=await run(`state.settings.onboarding_complete=false;starterReady();document.querySelector('.review-source').click();const modalText=modal.textContent,stillReview=!!document.querySelector('#starter-kindle');document.querySelector('#close-modal').click();return {modalText,stillReview,afterClose:!!document.querySelector('#starter-kindle')}`);
   assert.match(result.modalText,/Edit source/);assert.ok(result.stillReview&&result.afterClose);
