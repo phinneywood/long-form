@@ -38,7 +38,12 @@ test('unfinished account resumes at source review, and a queued issue resumes at
 
 test('Kindle details can be saved without queuing a first issue or enabling daily delivery',async()=>{
   const result=await run(`state.settings.onboarding_complete=false;state.settings.kindle_email='';onboarding();document.querySelector('#kindle-email').value='reader@kindle.com';let calls=[];api=async(path,options)=>{calls.push({path,body:options.body});state.settings={...state.settings,...options.body};return state};await document.querySelector('#save-kindle-later').click();const home=app.textContent;render();return {calls,home,review:!!document.querySelector('#starter-kindle'),saved:state.settings.kindle_email,paused:state.settings.paused}`);
-  assert.equal(result.calls.length,1);assert.equal(result.calls[0].path,'/settings');assert.equal(result.calls[0].body.paused,true);assert.equal(result.saved,'reader@kindle.com');assert.ok(result.paused&&result.review);assert.match(result.home,/First issue needed/);assert.match(result.home,/Send your first issue/);
+  assert.equal(result.calls.length,1);assert.equal(result.calls[0].path,'/settings');assert.equal(result.calls[0].body.paused,true);assert.equal(result.saved,'reader@kindle.com');assert.ok(result.paused&&!result.review);assert.match(result.home,/First issue needed/);assert.match(result.home,/Send your first issue/);
+});
+
+test('source review acknowledges a saved Kindle address',async()=>{
+  const result=await run(`state.settings.onboarding_complete=false;state.settings.kindle_email='reader@kindle.com';starterReady();return {text:app.textContent,button:document.querySelector('#starter-kindle').textContent}`);
+  assert.match(result.text,/before sending your first issue/);assert.doesNotMatch(result.text,/before connecting Kindle/);assert.match(result.button,/Continue to first issue/);
 });
 
 test('queued first issue asks for the daily choice instead of claiming Kindle setup is needed',async()=>{
