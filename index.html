@@ -376,8 +376,11 @@ function sourceProblemLink(id){
 function wireSourceReviews(root=document){root.querySelectorAll('.review-source').forEach(button=>button.onclick=()=>reviewSource(button.dataset.id))}
 function reviewSource(id){
   const context=sourceContext(id);if(!context){toast('This source is no longer available.');return}
-  closeModal(true);sourcesExpanded=true;dashboard();
-  const row=document.getElementById('feed-'+id);row?.scrollIntoView({block:'center'});row?.focus();
+  closeModal(true);
+  if(state.settings.onboarding_complete){
+    sourcesExpanded=true;dashboard();
+    const row=document.getElementById('feed-'+id);row?.scrollIntoView({block:'center'});row?.focus();
+  }
   feedActionsModal(id);
 }
 function feedRow(feed){
@@ -695,7 +698,7 @@ function feedActionsModal(id,checkMessage=''){
   document.querySelector('#manage-recheck').onclick=event=>recheckSource(id,event.currentTarget);
   document.querySelector('#manage-delete').onclick=()=>deleteFeedModal(id);
   document.querySelector('#manage-toggle').onclick=async()=>{
-    try{state=await api('/feeds/'+id,{method:'PATCH',body:{enabled:!feed.enabled}});closeModal(true);dashboard();toast(feed.enabled?'Source paused':'Source resumed')}
+    try{state=await api('/feeds/'+id,{method:'PATCH',body:{enabled:!feed.enabled}});closeModal(true);state.settings.onboarding_complete?dashboard():starterReady();toast(feed.enabled?'Source paused':'Source resumed')}
     catch(err){toast(err.message)}
   };
 }
@@ -729,6 +732,7 @@ async function recheckSource(id,button){
     if(token!==sessionToken||!state)return;
     state=response.dashboard;
     if(document.querySelector('.sources-list'))dashboard();
+    else if(document.querySelector('.starter-ready'))starterReady();
     if(version===modalVersion)feedActionsModal(id,response.result.error?'The source still needs attention. See the latest error above.':'Source is working. The warning has been cleared.');
   }catch(err){
     if(version!==modalVersion)return;
