@@ -306,7 +306,7 @@ function onboarding(){
       </div>
 
       <div class="setup-actions">
-        <button class="btn primary" id="finish-setup">Save & send a test issue →</button>
+        <button class="btn primary" id="finish-setup">Save & send my first issue →</button>
         <button class="btn" id="back-to-paper">Back to my paper</button>
       </div>
     </section>`,
@@ -316,18 +316,22 @@ function onboarding(){
   document.querySelector('#back-to-paper').onclick=()=>dashboard();
   document.querySelector('#copy-sender').onclick=async()=>{await navigator.clipboard.writeText(SENDER);toast('Sender address copied')};
   document.querySelector('#finish-setup').onclick=async()=>{
-    const kindle=document.querySelector('#kindle-email').value.trim();
-    const tz=document.querySelector('#timezone').value.trim();
-    const delivery=document.querySelector('#delivery-time').value;
+    const kindle=document.querySelector('#kindle-email').value.trim(),tz=document.querySelector('#timezone').value.trim(),delivery=document.querySelector('#delivery-time').value;
     if(!kindle){toast('Enter your Send-to-Kindle address first.');return}
     const button=document.querySelector('#finish-setup');button.disabled=true;button.textContent='Saving…';
     try{
-      state=await api('/settings',{method:'PATCH',body:{kindle_email:kindle,delivery_time:delivery,timezone:tz,onboarding_complete:true}});
-      localStorage.removeItem(SKIP_STARTERS_KEY);localStorage.removeItem(LEGACY_SKIP_STARTERS_KEY);
-      dashboard();
-      await queueSend('/send-test','Your first test issue is queued');
-    }catch(err){button.disabled=false;button.textContent='Save & send a test issue →';toast(err.message)}
+      state=await api('/settings',{method:'PATCH',body:{kindle_email:kindle,delivery_time:delivery,timezone:tz,paused:true}});
+      const result=await api('/send-now',{method:'POST',body:{request_id:crypto.randomUUID()}});
+      state.jobs=[result.job,...(state.jobs||[]).filter(j=>j.id!==result.job.id)];void watchJob(result.job.id);firstRunDeliveryChoice();
+    }catch(err){button.disabled=false;button.textContent='Save & send my first issue →';toast(err.message)}
   };
+}
+
+function firstRunDeliveryChoice(){
+  openModal(`<div class="row"><div><div class="editorial-label">One last choice</div><h2>Would you like daily issues?</h2></div><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Your first issue has been queued. Choose whether Long Form should keep sending new issues automatically.</p><form id="first-cadence"><label class="delivery-choice"><input type="radio" name="cadence" value="daily"> <span><strong>Yes, send daily issues</strong><small>Use the delivery time you chose above.</small></span></label><label class="delivery-choice"><input type="radio" name="cadence" value="once"> <span><strong>Just this issue for now</strong><small>You can turn daily delivery on later.</small></span></label><button class="btn primary mt-4" id="finish-first-run" disabled>Finish setup →</button></form>`);
+  document.querySelector('#close-modal').onclick=closeModal;
+  const form=document.querySelector('#first-cadence'),button=document.querySelector('#finish-first-run');form.querySelectorAll('input').forEach(i=>i.onchange=()=>button.disabled=false);
+  form.onsubmit=async e=>{e.preventDefault();const cadence=new FormData(form).get('cadence');button.disabled=true;try{state=await api('/settings',{method:'PATCH',body:{paused:cadence!=='daily',onboarding_complete:true}});closeModal(true);dashboard();toast(cadence==='daily'?'Daily delivery is on':'Setup complete — daily delivery is off')}catch(err){button.disabled=false;toast(err.message)}};
 }
 
 function feedStatus(feed){
