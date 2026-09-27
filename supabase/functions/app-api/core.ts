@@ -94,7 +94,7 @@ export function firstIssueSummary(job:any){
     introduction:job.status==="ready"?manifest?.introduction||null:null,
     issues:job.status==="ready"?review?.issues||manifest?.issues||[]:[],
     groups:job.status==="ready"?(review?.groups||selected).map((group:any,groupIndex:number)=>({
-      name:group.section?.name||"Reading",items:(group.items||[]).map((item:any,index:number)=>({
+      name:group.section?.name==="Other"?"Elsewhere":group.section?.name||"Reading",items:(group.items||[]).map((item:any,index:number)=>({
         groupIndex,index,title:item.title||"Untitled",source:item.source||item.feed_name||item.source_name||null,
         url:item.url,excerpt:item.excerpt||null,warnings:item.warnings||[]
       }))

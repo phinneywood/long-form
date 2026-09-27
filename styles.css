@@ -335,7 +335,7 @@ footer span { margin-left: auto; }
 .first-issue-item { padding: 22px 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
 .first-issue-item h3 { font-size: 23px; }
 .first-issue-item p { margin: 10px 0; }
-.first-issue-reader { display: block; width: 100%; height: min(75vh, 850px); border: 1px solid var(--rule); background: #fff; }
+.first-issue-reader { display: block; width: 100%; height: min(75vh, 850px); border: 0; border-top: 1px solid var(--rule); background: var(--paper); }
 @media(max-width: 600px) { .first-issue-intro { padding: 16px; } .first-issue-reader { height: 70vh; } }
 .source-examples { margin-top: 24px; padding: 16px 0; border-block: 1px solid var(--rule); color: var(--body); font-size: 14px; line-height: 1.7; }
 .source-examples span { display: block; margin-bottom: 6px; color: var(--muted); font: 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
