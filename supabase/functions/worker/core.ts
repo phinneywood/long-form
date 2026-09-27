@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { Buffer } from "node:buffer";
 import { XMLParser } from "npm:fast-xml-parser@5.11.1";
 import { extractArticle, extractionBudget, hydrateArticleImages, omitArticleImages, type ExtractionBudget, fetchPublicText, sha256, textValue } from "../_shared/article.ts";
 import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "../_shared/delivery.ts";
@@ -15,7 +16,7 @@ const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_
 const headers = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" };
 
 class FrozenManifestReady extends Error {
-  constructor() {
+  constructor(readonly stage = "frozen-manifest") {
     super("Frozen manifest ready for deterministic continuation.");
     this.name = "FrozenManifestReady";
   }
@@ -172,9 +173,7 @@ function testArtifactIdentity(job: any, now: Date, timezone: string, displayDate
 }
 
 function base64(bytes: Uint8Array) {
-  let output = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) output += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  return btoa(output);
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
 
 function summarizeMedia(items: EpubArticle[]) {
@@ -304,9 +303,10 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
   let issueIntroduction: string | null = null;
 
   const frozen = job.result?.preparation_manifest;
-  if ((frozen?.version === 1 || frozen?.version === 2) && Array.isArray(frozen.groups)) {
-    selectedGroups = frozen.groups;
-    pendingItems = Array.isArray(frozen.pendingItems) ? frozen.pendingItems : [];
+  if ([1, 2, 3].includes(frozen?.version) && Array.isArray(frozen.groups)) {
+    const restore = (item: any): EpubArticle => ({ ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: typeof asset.bytes === "string" ? Buffer.from(asset.bytes, "base64") : asset.bytes })) });
+    selectedGroups = frozen.groups.map((group: any) => ({ ...group, items: group.items.map(restore) }));
+    pendingItems = Array.isArray(frozen.pendingItems) ? frozen.pendingItems.map(restore) : [];
     issues = Array.isArray(frozen.issues) ? frozen.issues : [];
     feedCount = Number(frozen.feedCount || 0);
     editorialSummary = frozen.editorial || null;
@@ -542,48 +542,65 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
     throw new FrozenManifestReady();
   }
 
-  const budget = extractionBudget(deadline);
-  const selected = [...selectedGroups.flatMap((group) => group.items), ...pendingItems];
-  const hydrated = new Map<string, EpubArticle>();
-  let imageCursor = 0;
-  const hydrationStarted = performance.now();
-  logEvent("digest.stage_started", { job_id: job.id, stage: "image_hydration", articles: selected.length });
-  async function imageHydrator() {
-    while (true) {
-      const index = imageCursor++;
-      if (index >= selected.length) return;
-      const item = selected[index];
-      try {
-        if (job.reason === "test") hydrated.set(item.article_hash, omitArticleImages(item));
-        else hydrated.set(item.article_hash, await hydrateArticleImages(item, budget));
-      } catch (error) {
-        hydrated.set(item.article_hash, {
-          ...item,
-          warnings: [...new Set([...(item.warnings || []), "Images could not be prepared; the article text was preserved."])],
-        });
-        logEvent("article.image_hydration_failed", {
-          job_id: job.id, url: item.canonical_url,
-          error: error instanceof Error ? error.message : String(error),
-        }, "warn");
+  if (frozen?.version !== 3) {
+    const budget = extractionBudget(deadline);
+    const selected = [...selectedGroups.flatMap((group) => group.items), ...pendingItems];
+    const hydrated = new Map<string, EpubArticle>();
+    let imageCursor = 0;
+    const hydrationStarted = performance.now();
+    logEvent("digest.stage_started", { job_id: job.id, stage: "image_hydration", articles: selected.length });
+    async function imageHydrator() {
+      while (true) {
+        const index = imageCursor++;
+        if (index >= selected.length) return;
+        const item = selected[index];
+        try {
+          if (job.reason === "test") hydrated.set(item.article_hash, omitArticleImages(item));
+          else hydrated.set(item.article_hash, await hydrateArticleImages(item, budget));
+        } catch (error) {
+          hydrated.set(item.article_hash, {
+            ...item,
+            warnings: [...new Set([...(item.warnings || []), "Images could not be prepared; the article text was preserved."])],
+          });
+          logEvent("article.image_hydration_failed", {
+            job_id: job.id, url: item.canonical_url,
+            error: error instanceof Error ? error.message : String(error),
+          }, "warn");
+        }
       }
     }
+    await Promise.all(Array.from({ length: Math.min(2, selected.length) }, () => imageHydrator()));
+    logEvent("digest.stage_completed", {
+      job_id: job.id,
+      stage: "image_hydration",
+      duration_ms: Math.round(performance.now() - hydrationStarted),
+      articles: selected.length,
+    });
+
+    // End the image-processing invocation before CPU-heavy cover rendering and
+    // ZIP packaging. Persist binary assets explicitly; JSON cannot round-trip
+    // Uint8Array. Retries reuse these bytes instead of fetching images again.
+    const persist = (item: EpubArticle) => {
+      const prepared = hydrated.get(item.article_hash) || item;
+      return { ...prepared, assets: (prepared.assets || []).map(asset => ({ ...asset, bytes: base64(asset.bytes) })) };
+    };
+    const checkpoint = { ...frozen, version: 3,
+      groups: selectedGroups.map(group => ({ ...group, items: group.items.map(persist) })),
+      pendingItems: pendingItems.map(persist),
+    };
+    const saved = await admin.from("digest_jobs").update({ result: { ...(job.result || {}), preparation_manifest: checkpoint } }).eq("id", job.id);
+    if (saved.error) throw saved.error;
+    throw new FrozenManifestReady("prepared-media");
   }
-  await Promise.all(Array.from({ length: Math.min(2, selected.length) }, () => imageHydrator()));
-  logEvent("digest.stage_completed", {
-    job_id: job.id,
-    stage: "image_hydration",
-    duration_ms: Math.round(performance.now() - hydrationStarted),
-    articles: selected.length,
-  });
 
   const groups: { section: any; items: EpubArticle[] }[] = [];
   const issueItems: EpubArticle[] = [];
   for (const group of selectedGroups) {
-    const items = group.items.map((item) => hydrated.get(item.article_hash) || item);
+    const items = group.items;
     groups.push({ section: group.section, items });
     issueItems.push(...items);
   }
-  const hydratedPending = pendingItems.map((item) => hydrated.get(item.article_hash) || item);
+  const hydratedPending = pendingItems;
   issueItems.push(...hydratedPending);
   if (hydratedPending.length) groups.push({ section: { id: null, name: "Saved articles" }, items: hydratedPending });
 
@@ -668,7 +685,7 @@ async function prepareDeliveryPayload(job: any, deadline: number, previewOnly = 
     editorial: (prepared as any).editorial || null,
     qa: (prepared as any).qa || null,
     media: (prepared as any).media || null,
-    pendingItems: (prepared as any).pendingItems || [],
+    pendingItems: ((prepared as any).pendingItems || []).map(({ body, assets, ...item }: any) => item),
   };
 }
 
@@ -693,8 +710,8 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
         const frozen = await admin.from("delivery_outbox").insert({ job_id: job.id, payload });
         if (frozen.error) throw frozen.error;
       }
-      const ready = await admin.from("digest_jobs").update({ status: "ready", finished_at: new Date().toISOString(), error: null,
-        result: { ...(job.result || {}), preview_review: { groups: payload.groups, issues: payload.issues } },
+      const ready = await admin.from("digest_jobs").update({ status: "ready", attempts: 0, finished_at: new Date().toISOString(), error: null,
+        result: { ...(job.result || {}), preview_review: { groups: payload.groups.map((group: any) => ({ section: group.section, items: group.items.map(({ assets, body, ...item }: any) => item) })), issues: payload.issues } },
       }).eq("id", job.id);
       if (ready.error) throw ready.error;
       logEvent("first_issue.ready", { job_id: job.id, user_id: job.user_id, sections: payload.groups.length, duration_ms: Math.round(performance.now() - started) });
@@ -736,6 +753,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     if (error instanceof FrozenManifestReady) {
       const requeue = await admin.from("digest_jobs").update({
         status: "queued",
+        attempts: Math.max(0, job.attempts - 1),
         run_after: new Date().toISOString(),
         error: null,
       }).eq("id", job.id);
@@ -749,7 +767,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
         worker_triggered: !kickError && Boolean(kick),
         duration_ms: Math.round(performance.now() - started),
       }, kickError ? "warn" : "info");
-      return { job: job.id, status: "queued", continuation: "frozen-manifest" };
+      return { job: job.id, status: "queued", continuation: error.stage };
     }
     const message = (error instanceof Error ? error.message : String((error as any)?.message || error)).slice(0, 800);
     const attempts = job.attempts;
