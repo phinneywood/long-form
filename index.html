@@ -57,6 +57,36 @@ function maskEmail(value){
 }
 
 
+function issueSupplyText(job){
+  const supply=job?.result?.editorial?.supply;if(!supply)return '';
+  const parts=[`About ${supply.estimated_reading_minutes} minutes of reading`,`${supply.fresh_articles} new from checked sources`];
+  if(supply.catchup_articles)parts.push(`${supply.catchup_articles} earlier unread`);
+  if(supply.discovery_articles)parts.push(`${supply.discovery_articles} discoveries`);
+  const unavailable=(supply.failed_sources||0)+(supply.unchecked_sources||0);
+  if(unavailable)parts.push(`${unavailable} source${unavailable===1?'':'s'} unavailable`);
+  return parts.join(' · ');
+}
+function issueSupplyDetails(job){
+  const supply=job?.result?.editorial?.supply;if(!supply)return '';
+  const summary=issueSupplyText(job);
+  const note=supply.short_issue?'This was a lighter issue. The 30-minute target guides additions; it never forces filler.':'The reading target never removes or shortens subscribed articles.';
+  const rows=(supply.feed_reports||[]).map(r=>{
+    if(r.status==='failed'||r.status==='not_checked')return `<p class="small"><strong>${esc(displayText(r.name))}</strong>: ${esc(r.error||'Not checked before the preparation limit.')}</p>`;
+    const counts=[`${r.entries_seen} entries found`,`${r.fresh_included+r.catchup_included} included`];
+    if(r.invalid)counts.push(`${r.invalid} invalid entries`);
+    if(r.already_delivered)counts.push(`${r.already_delivered} already delivered`);
+    if(r.outside_window)counts.push(`${r.outside_window} outside the date window`);
+    if(r.duplicates)counts.push(`${r.duplicates} duplicates`);
+    if(r.extraction_failed)counts.push(`${r.extraction_failed} unreadable`);
+    if(r.out_of_scope)counts.push(`${r.out_of_scope} outside the source filter`);
+    if(r.not_needed)counts.push(`${r.not_needed} not used for catch-up`);
+    if(r.resource_deferred+r.scan_limited)counts.push(`${r.resource_deferred+r.scan_limited} deferred by limits`);
+    if(r.retries)counts.push('recovered after retry');
+    return `<p class="small"><strong>${esc(displayText(r.name))}</strong>: ${esc(counts.join(' · '))}</p>`;
+  }).join('');
+  return `<details class="mt-2"><summary>Why this issue was this size</summary><p class="small muted">${esc(summary)}. ${esc(note)}</p>${rows}</details>`;
+}
+
 function latestRunText(job){
   if(!job)return 'No deliveries yet';
   const when=fmtTime(job.finished_at||job.updated_at||job.created_at);
@@ -510,6 +540,7 @@ function dashboard(){
           `}
         </div>
         <div class="issue-status" role="status">${esc(latestRunText(latestJob))}</div>
+        ${issueSupplyText(latestJob)?`<p class="small muted">${esc(issueSupplyText(latestJob))}</p>`:''}
         <div class="issue-reading">
           <button class="reading-action" id="one-time-send">
             <span class="reading-copy">
@@ -977,7 +1008,7 @@ async function historyModal(){
   document.querySelector('#close-modal').onclick=closeModal;
   try{state=await api('/me')}catch(err){if(version===modalVersion)toast(err.message)}
   if(version!==modalVersion)return;
-  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
+  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.result?.edition_title||job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${issueSupplyDetails(job)}${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
   document.querySelector('#close-modal').onclick=closeModal;document.querySelector('#refresh-history').onclick=historyModal;
   modal.querySelectorAll('.resend-packet').forEach(button=>button.onclick=()=>{const job=state.jobs.find(j=>j.id===button.dataset.id);oneTimeEditionModal({name:job.packet_name,urls:job.article_urls.join('\n'),request_id:crypto.randomUUID()})});
 }

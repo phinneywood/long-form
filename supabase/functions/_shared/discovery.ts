@@ -11,6 +11,7 @@ export type DiscoveryLaneReport = {
   status: "discovered" | "skipped" | "fallback";
   model: string;
   candidates: number;
+  rejected_candidates?: number;
   error?: string;
   usage?: Record<string, unknown>;
 };
@@ -36,14 +37,14 @@ function outputText(payload: any): string {
   throw new Error("OpenAI returned no structured discovery output.");
 }
 
-function candidateSchema() {
+function candidateSchema(limit = 2) {
   return {
     type: "object",
     properties: {
       articles: {
         type: "array",
         minItems: 0,
-        maxItems: 2,
+        maxItems: limit,
         items: {
           type: "object",
           properties: {
@@ -95,6 +96,10 @@ async function discoverLane(
     apiKey?: string;
     model?: string;
     additionalInstructions?: string;
+    excludedUrls?: string[];
+    relatedLimit?: number;
+    openLimit?: number;
+    maxCandidates?: number;
     deadline: number;
     fetchImpl?: typeof fetch;
   },
@@ -102,7 +107,8 @@ async function discoverLane(
   const model = options.model || DEFAULT_MODEL;
   const brief = String(editorialBrief || "").trim().slice(0, 3000);
   const additionalInstructions = String(options.additionalInstructions || "").trim().slice(0, 3000);
-  if (!articles.length || (kind === "open" && !brief)) {
+  const limit = Math.max(0, Math.min(4, Math.floor(options.maxCandidates ?? 2)));
+  if (!limit || (kind === "related" && !articles.length) || (kind === "open" && !brief)) {
     return {
       candidates: [],
       report: { kind, status: "skipped", model, candidates: 0 },
@@ -127,11 +133,14 @@ async function discoverLane(
 
   const core = compactCore(articles);
   const existing = new Set(core.map((item) => normalizedUrl(item.url)).filter(Boolean) as string[]);
+  const excluded = (options.excludedUrls || []).map(normalizedUrl).filter(Boolean) as string[];
+  for (const url of excluded) existing.add(url);
   const sectionNames = [...new Set(core.map((item) => item.section))];
 
   const relatedSystem = [
     "You are the Related Discovery editor for Long Form.",
-    "Use web search to find zero to two excellent, publicly readable original articles OUTSIDE the reader's subscribed RSS corpus.",
+    `Use web search to find zero to ${limit} excellent, publicly readable original articles OUTSIDE the reader's subscribed RSS corpus.`,
+    "Never return an excluded URL or lower the quality bar to fill the available slots. Favor substantial originals over short tool announcements, homepages, and promotional pages.",
     "Every recommendation must be directly related to a meaningful theme already present in today's organized RSS issue.",
     "Add something the RSS issue is missing: primary evidence, important context, a useful counterpoint, a follow-up, or an unusually strong treatment.",
     "Do not recommend a near-duplicate that merely repeats an article already present.",
@@ -143,7 +152,8 @@ async function discoverLane(
 
   const openSystem = [
     "You are the Open Discovery editor for Long Form.",
-    "Use web search to find zero to two excellent, publicly readable original articles OUTSIDE the reader's subscribed RSS corpus.",
+    `Use web search to find zero to ${limit} excellent, publicly readable original articles OUTSIDE the reader's subscribed RSS corpus.`,
+    "Never return an excluded URL or lower the quality bar to fill the available slots. Favor substantial originals over short tool announcements, homepages, and promotional pages.",
     "These recommendations must also be meaningfully OUTSIDE the topics and themes represented in today's organized RSS issue.",
     "Use the explicit editorial brief to choose broadly interesting, intellectually worthwhile, somewhat surprising reading.",
     "This lane is controlled serendipity, not an extension of today's RSS coverage.",
@@ -176,6 +186,7 @@ async function discoverLane(
             content: JSON.stringify({
               editorial_brief: brief,
               additional_instructions: additionalInstructions,
+              excluded_urls: excluded.slice(0, 200),
               core_sections: sectionNames,
               core_articles: core,
             }),
@@ -186,7 +197,7 @@ async function discoverLane(
             type: "json_schema",
             name: `morning_reader_${kind}_discovery`,
             strict: true,
-            schema: candidateSchema(),
+            schema: candidateSchema(limit),
           },
         },
       }),
@@ -199,7 +210,7 @@ async function discoverLane(
 
     const candidates: DiscoveryCandidate[] = [];
     const seen = new Set<string>();
-    for (const rawCandidate of parsed.articles.slice(0, 2)) {
+    for (const rawCandidate of parsed.articles.slice(0, limit)) {
       const url = normalizedUrl(rawCandidate?.url);
       if (!url || existing.has(url) || seen.has(url)) continue;
       const title = String(rawCandidate?.title || "").trim().replace(/\s+/g, " ").slice(0, 240);
@@ -216,6 +227,7 @@ async function discoverLane(
         status: "discovered",
         model,
         candidates: candidates.length,
+        rejected_candidates: Math.max(0, Math.min(parsed.articles.length, limit) - candidates.length),
         usage: payload.usage || undefined,
       },
     };
@@ -240,14 +252,18 @@ export async function discoverBeyondRss(
     apiKey?: string;
     model?: string;
     additionalInstructions?: string;
+    excludedUrls?: string[];
+    relatedLimit?: number;
+    openLimit?: number;
+    maxCandidates?: number;
     deadline?: number;
     fetchImpl?: typeof fetch;
   } = {},
 ): Promise<DiscoveryResult> {
   const deadline = options.deadline ?? Date.now() + 35_000;
   const [related, open] = await Promise.all([
-    discoverLane("related", articles, editorialBrief, { ...options, deadline }),
-    discoverLane("open", articles, editorialBrief, { ...options, deadline }),
+    discoverLane("related", articles, editorialBrief, { ...options, deadline, maxCandidates: options.relatedLimit ?? 2 }),
+    discoverLane("open", articles, editorialBrief, { ...options, deadline, maxCandidates: options.openLimit ?? 2 }),
   ]);
 
   const relatedUrls = new Set(related.candidates.map((candidate) => normalizedUrl(candidate.url)).filter(Boolean));
