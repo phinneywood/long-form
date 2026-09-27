@@ -627,7 +627,7 @@ function singleFeedModal(){
       if(!feeds.length)throw new Error("No RSS or Atom feed found.");
       if(feeds.length===1){
         state=await api('/feeds',{method:'POST',body:{url:feeds[0].url}});
-        closeModal(true);dashboard();toast('Source added');return;
+        closeModal(true);state.settings.onboarding_complete?dashboard():starterPicker();toast('Source added');return;
       }
       chooseFeedModal(feeds);
     }catch(err){
@@ -643,7 +643,7 @@ function chooseFeedModal(feeds){
   document.querySelector('#close-modal').onclick=closeModal;
   document.querySelectorAll('.choose-discovered-feed').forEach(button=>button.onclick=async()=>{
     const feed=feeds[Number(button.dataset.i)];button.disabled=true;
-    try{state=await api('/feeds',{method:'POST',body:{url:feed.url}});closeModal(true);dashboard();toast('Source added')}
+    try{state=await api('/feeds',{method:'POST',body:{url:feed.url}});closeModal(true);state.settings.onboarding_complete?dashboard():starterPicker();toast('Source added')}
     catch(err){button.disabled=false;toast(err.message)}
   });
 }
@@ -687,7 +687,7 @@ function sourceEditModal(id){
     button.disabled=true;button.textContent='Checking…';
     try{
       state=await api('/feeds/'+id,{method:'PATCH',body:{name:String(form.get('name')||'').trim(),url:String(form.get('url')||'').trim()}});
-      closeModal(true);sourcesExpanded=true;dashboard();toast('Source updated');
+      closeModal(true);if(state.settings.onboarding_complete){sourcesExpanded=true;dashboard()}else starterReady();toast('Source updated');
     }catch(err){button.disabled=false;button.textContent='Save source';toast(err.message)}
   };
 }
@@ -713,7 +713,7 @@ function deleteFeedModal(id){
   openModal(`<h2>Delete feed?</h2><p>This removes <strong>${esc(feed?.name||'this feed')}</strong> from future issues. Past delivery history remains.</p><div class="align-start row wrap"><button class="btn danger" id="confirm-delete">Delete feed</button><button class="btn" id="cancel-delete">Cancel</button></div>`);
   document.querySelector('#cancel-delete').onclick=closeModal;
   document.querySelector('#confirm-delete').onclick=async()=>{
-    try{state=await api('/feeds/'+id,{method:'DELETE'});closeModal(true);dashboard();toast('Feed deleted')}
+    try{state=await api('/feeds/'+id,{method:'DELETE'});closeModal(true);state.settings.onboarding_complete?dashboard():starterReady();toast('Feed deleted')}
     catch(err){toast(err.message)}
   };
 }
