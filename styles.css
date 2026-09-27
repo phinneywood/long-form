@@ -215,6 +215,13 @@ footer span { margin-left: auto; }
 .auth-page { padding-block: 12px 24px; }
 .auth-hero h1 { max-width: 780px; font-size: clamp(39px, 5.6vw, 64px); }
 .auth-kicker { margin-bottom: 24px; color: var(--muted); }
+.auth-benefits { display: grid; gap: 8px; margin: 28px 0 24px; color: var(--body); font-size: 14px; }
+.auth-benefits span::before { content: '✓'; display: inline-block; width: 24px; color: var(--accent); }
+.sample-note { margin-block: 28px; padding-block: 24px; border-block: 1px solid var(--rule); }
+.sample-note p { margin: 0; color: var(--ink); font: 20px/1.55 var(--serif); }
+.sample-article { padding-block: 20px; border-top: 1px solid var(--rule); }
+.sample-article h3 { margin: 8px 0; font-size: 24px; }
+.sample-article a { font-size: 14px; }
 .auth-form-section { max-width: 520px; margin-top: var(--space-7); padding-top: var(--space-6); border-top: 1px solid var(--rule); }
 .auth-form { margin-top: var(--space-5); }
 .auth-form-copy { font-size: 14px; color: var(--body); }
