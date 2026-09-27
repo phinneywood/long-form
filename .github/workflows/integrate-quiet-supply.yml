@@ -22,7 +22,7 @@ jobs:
           git config user.name 'Long Form implementation'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin feat/frozen-first-issue
-          test "$(git rev-parse FETCH_HEAD)" = '808fdb9288e53feb1e70d711bbb80102bf6aa1dd'
+          test "$(git rev-parse FETCH_HEAD)" = '4ec64e1f486cf1a6eb186ce030468823b182d721'
           git merge --no-commit --no-ff FETCH_HEAD
       - run: python scripts/apply_supply_patch.py
       - run: npm ci
