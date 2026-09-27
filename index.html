@@ -266,7 +266,7 @@ function starterReady(){
   app.innerHTML=shell(`
     <section class="starter-ready onboarding-page">
       <div class="editorial-label">Your sources</div>
-      <h1>You're all set.</h1>
+      <h1>Review your sources.</h1>
       <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before connecting Kindle; you can edit or remove them here.</div>
       <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div>${feed.last_error?`<div class="feed-error">Last check failed: ${esc(feed.last_error)}</div>`:''}</div><button class="btn small-btn review-source" data-id="${esc(feed.id)}" aria-label="Review ${esc(displayText(feed.name||feed.url))}">Review</button></div>`).join('')}</div>
       <div class="ready-actions">
@@ -286,9 +286,9 @@ function onboarding(){
   const timezone=settings.timezone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';
   app.innerHTML=shell(`
     <section class="setup-page">
-      <div class="editorial-label">Final step</div>
+      <div class="editorial-label">Kindle setup</div>
       <h1>Send it to your Kindle.</h1>
-      <div class="editorial-copy">Approve Long Form’s sender in Amazon and enter the address for the Kindle device or app where you want the issue. Long Form cannot check Amazon approval or confirm arrival.</div>
+      <div class="editorial-copy">Approve Long Form’s sender in Amazon and enter the address for the Kindle device or app where you want the issue. You can save these details without sending. Long Form cannot check Amazon approval or confirm arrival.</div>
 
       <div class="setup-list">
         <div class="setup-row">
@@ -328,6 +328,7 @@ function onboarding(){
 
       <div class="setup-actions">
         <button class="btn primary" id="finish-setup">Save & queue my first issue →</button>
+        <button class="btn" id="save-kindle-later">Save without sending</button>
         <button class="btn" id="back-to-paper">Back to sources</button>
         <button class="btn" id="finish-later">Set up Kindle later</button>
       </div>
@@ -338,6 +339,15 @@ function onboarding(){
   document.querySelector('#back-to-paper').onclick=starterReady;
   document.querySelector('#finish-later').onclick=dashboard;
   document.querySelector('#copy-sender').onclick=async()=>{await navigator.clipboard.writeText(SENDER);toast('Sender address copied')};
+  document.querySelector('#save-kindle-later').onclick=async()=>{
+    const kindle=document.querySelector('#kindle-email').value.trim(),tz=document.querySelector('#timezone').value.trim(),delivery=document.querySelector('#delivery-time').value;
+    if(!kindle){toast('Enter your Send-to-Kindle address first.');return}
+    const button=document.querySelector('#save-kindle-later');button.disabled=true;button.textContent='Saving…';
+    try{
+      state=await api('/settings',{method:'PATCH',body:{kindle_email:kindle,delivery_time:delivery,timezone:tz,paused:true}});
+      dashboard();toast('Kindle details saved. No issue was queued; daily delivery is off.');
+    }catch(err){button.disabled=false;button.textContent='Save without sending';toast(err.message)}
+  };
   document.querySelector('#finish-setup').onclick=async()=>{
     const kindle=document.querySelector('#kindle-email').value.trim(),tz=document.querySelector('#timezone').value.trim(),delivery=document.querySelector('#delivery-time').value;
     if(!kindle){toast('Enter your Send-to-Kindle address first.');return}
@@ -397,7 +407,11 @@ function feedRow(feed){
 }
 
 function nextIssueDelivery(){
-  if(!state.settings.onboarding_complete||!state.settings.kindle_email)return 'Connect your Kindle';
+  if(!state.settings.onboarding_complete){
+    if(firstRunJob())return 'Choose daily delivery';
+    return state.settings.kindle_email?'Send your first issue':'Connect your Kindle';
+  }
+  if(!state.settings.kindle_email)return 'Connect your Kindle';
   if(state.settings.paused)return 'Delivery paused';
   return state.settings.next_run_at?new Intl.DateTimeFormat('en-US',{timeZone:state.settings.timezone,weekday:'long',hour:'numeric',minute:'2-digit'}).format(new Date(state.settings.next_run_at)):'Not scheduled';
 }
@@ -415,7 +429,7 @@ function dashboard(){
   const problemFeeds=sources.filter(sourceNeedsAttention);
   const latestJob=(state.jobs||[])[0];
   const busy=(state.jobs||[]).some(job=>job.reason!=='one_time'&&['queued','running'].includes(job.status));
-  const issueState=!settings.onboarding_complete||!settings.kindle_email?'Setup needed':settings.paused?'Paused':'Scheduled';
+  const issueState=!settings.onboarding_complete?(firstRunJob()?'Choice needed':settings.kindle_email?'First issue needed':'Setup needed'):!settings.kindle_email?'Setup needed':settings.paused?'Paused':'Scheduled';
   const firstProblem=problemFeeds[0];
   const editorialBrief=String(settings.editorial_brief||'').trim();
   const editorialInstructions=String(settings.editorial_instructions||'').trim();
@@ -438,7 +452,7 @@ function dashboard(){
             <button class="btn" id="preview">Browse articles</button>
             <button class="btn icon-button" id="delivery-menu" aria-label="More delivery options">•••</button>
           `:`
-            <button class="btn primary" id="connect-kindle">${firstRunJob()?'Finish setup':'Connect Kindle'}</button>
+            <button class="btn primary" id="connect-kindle">${firstRunJob()?'Finish setup':settings.kindle_email?'Continue setup':'Connect Kindle'}</button>
             <button class="btn" id="preview">Browse articles</button>
           `}
         </div>
