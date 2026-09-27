@@ -1,3 +1,4 @@
+import { coverFonts } from "./cover-fonts.ts";
 import JSZip from "npm:jszip@3.10.1";
 import { ImageResponse } from "npm:@vercel/og@0.6.8";
 import React from "npm:react@19.1.1";
@@ -131,7 +132,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   const cover = element("div", {
     style: {
       width: "100%", height: "100%", display: "flex", flexDirection: "column",
-      background: paper, color: ink, fontFamily: "serif", border: `10px solid ${ink}`,
+      background: paper, color: ink, fontFamily: "PublicationSerif", border: `10px solid ${ink}`,
       padding: "56px 62px 48px",
     },
   },
@@ -200,7 +201,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   }, lead.section),
   lead.story ? element("div", {
     style: {
-      fontFamily: "sans-serif", fontSize: 28, lineHeight: 1.24, marginTop: 28,
+      fontFamily: "PublicationSans", fontSize: 28, lineHeight: 1.24, marginTop: 28,
       color: "#e4e4e4", maxWidth: 980,
     },
   }, lead.story) : null),
@@ -222,7 +223,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
       style: { fontSize: coverSectionSize(line.section), fontWeight: 700, lineHeight: 1.02, letterSpacing: -1.1 },
     }, line.section),
     line.story ? element("div", {
-      style: { fontFamily: "sans-serif", fontSize: 22, lineHeight: 1.28, color: muted, marginTop: 9 },
+      style: { fontFamily: "PublicationSans", fontSize: 22, lineHeight: 1.28, color: muted, marginTop: 9 },
     }, line.story) : null
   )))),
   element("div", {
@@ -235,7 +236,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
   element("div", null, `${articleCount} ${articleCount === 1 ? "story" : "stories"}`),
   element("div", { style: { textTransform: "none", letterSpacing: .4 } }, "reader.antonioskilton.com")));
 
-  const response = new ImageResponse(cover, { width: 1200, height: 1920 });
+  const response = new ImageResponse(cover, { width: 1200, height: 1920, fonts: coverFonts });
   if (!response.ok) throw new Error("Could not render the cover image.");
   return new Uint8Array(await response.arrayBuffer());
 }
