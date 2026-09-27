@@ -83,6 +83,7 @@ try{
    await route.fulfill({contentType:'application/json',body:JSON.stringify(payload)});
   });
   await page.goto(base);await page.locator('#login-submit').waitFor();await capture('sign-in',width);
+  await page.locator('#read-sample').click();await capture('public-sample',width);await page.locator('#close-modal').click();
   await page.locator('#email').fill('reader@example.com');await page.locator('#login-submit').click();await page.locator('#code').waitFor();await capture('verification',width);
   await page.locator('#code').fill('123456');await page.locator('#verify-form .primary').click();await page.locator('#send-now').waitFor();
   assert.equal(await page.locator('.home-dashboard > section').count(),3);await capture('home',width);
@@ -107,8 +108,10 @@ try{
   await page.locator('#kindle-edit-settings').click();await capture('settings',width);
   await home();await page.locator('#account-menu').click();await page.locator('#account-system-health').click();await page.locator('.system-metrics').waitFor();await capture('system-health',width);
   await home();await page.evaluate(()=>{state.settings.onboarding_complete=false;state.sources=[];starterPicker();});await capture('starter-packs',width);
-  await page.evaluate(()=>starterReady(STARTER_EDITIONS[0],{added:5}));await capture('starter-ready',width);
+  await page.evaluate(()=>{state.sources=STARTER_EDITIONS[0].sources.slice(0,3).map((source,i)=>({...source,id:'starter-'+i,enabled:true}));starterReady();});await capture('starter-ready',width);
+  await page.locator('.review-source').first().click();await capture('first-source-review',width);await page.locator('#close-modal').click();
   await page.evaluate(()=>onboarding());await capture('onboarding',width);
+  await page.evaluate(()=>{state.settings.kindle_email='reader_sample@kindle.com';state.settings.paused=true;state.jobs=[{id:'first',reason:'manual',status:'queued'}];dashboard();firstRunDeliveryChoice();});await capture('first-delivery-choice',width);
   await home();await page.evaluate(()=>{state.sources=[];state.jobs=[];state.settings.editorial_brief='';state.settings.editorial_instructions='';dashboard();});await capture('empty-home',width);
   await home();await page.evaluate(()=>{state.settings.paused=true;dashboard();});await capture('paused-home',width);
   await home();await page.evaluate(()=>{state.settings.onboarding_complete=false;state.settings.kindle_email='';dashboard();});await capture('setup-needed',width);
