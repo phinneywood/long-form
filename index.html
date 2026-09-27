@@ -131,9 +131,9 @@ function landing(error=''){
   app.innerHTML=shell(`
     <section class="auth-page">
       <div class="auth-hero">
-        <div class="auth-kicker">RSS → EPUB → KINDLE</div>
+        <div class="auth-kicker">A PERSONAL DAILY PUBLICATION</div>
         <h1>Take back your attention.<br>Read something worth finishing.</h1>
-        <div class="auth-lede">Bring the publications you trust. Long Form turns their long-form writing into one calm Kindle issue, with you in charge of what gets your attention.</div>
+        <div class="auth-lede">Your favorite reading, gathered into one Kindle issue. Long Form keeps the original writing intact and gives it a thoughtful editorial shape.</div>
       </div>
 
       <section class="auth-form-section">
@@ -201,37 +201,25 @@ function allSources(){
 function feedCount(){return allSources().length}
 
 function starterPicker(){
+  const sources=allSources();
   app.innerHTML=shell(`
-    <section class="starter-page">
-      <div class="editorial-label">Start reading first</div>
-      <h1>Build your first Long Form issue.</h1>
-      <div class="editorial-copy">You don't need to know anything about RSS. Pick a starter pack or bring your own sources. Long Form will organize the articles for each issue automatically.</div>
-
-      <button class="mt-5 btn primary" id="starter-one-time">Add articles to next issue →</button><div class="starter-deck">
-        ${STARTER_EDITIONS.map(pack=>`<div class="starter-option">
-          <div>
-            <h3>${esc(pack.name)}</h3>
-            <p>${esc(pack.description)}</p>
-            <div class="starter-sources">${pack.sources.map(source=>esc(source.name)).join(' · ')}</div>
-          </div>
-          <button class="btn starter-add add-starter" data-id="${pack.id}" aria-label="Add ${esc(pack.name)} sources">+</button>
-        </div>`).join('')}
-      </div>
-
+    <section class="starter-page onboarding-page">
+      <div class="editorial-label">Your reading</div>
+      <h1>Add your sources.</h1>
+      <div class="editorial-copy">Add the websites and feeds you already read. Long Form will use them as recurring sources for one publication.</div>
+      <button class="mt-5 btn primary" id="onboarding-add-source">+ Add a source</button>
+      <div class="source-examples"><span>Examples from a real Long Form setup</span>Simon Willison · Commoncog · The Beautiful Mess · Lessons · Rands in Repose</div>
+      ${sources.length?`<div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div></div></div>`).join('')}</div>`:''}
       <div class="starter-footer">
-        <span class="technical-note">One tap adds these live sources. No categories to maintain.</span>
-        <button class="btn small-btn" id="bring-own-feeds">I already have feeds →</button>
+        <button class="btn" id="onboarding-import">Import OPML</button>
+        <button class="btn primary" id="review-sources" ${sources.length?'':'disabled'}>Review my sources →</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
-
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#starter-one-time').onclick=()=>oneTimeEditionModal();
-  document.querySelector('#bring-own-feeds').onclick=()=>{
-    localStorage.setItem(SKIP_STARTERS_KEY,'1');
-    dashboard();
-  };
-  document.querySelectorAll('.add-starter').forEach(button=>button.onclick=()=>installStarter(button.dataset.id,button));
+  document.querySelector('#onboarding-add-source').onclick=singleFeedModal;
+  document.querySelector('#onboarding-import').onclick=opmlImportModal;
+  document.querySelector('#review-sources').onclick=()=>starterReady();
 }
 
 async function installStarter(id,button){
@@ -251,31 +239,25 @@ async function installStarter(id,button){
   }
 }
 
-function starterReady(pack,summary={}){
-  const count=feedCount()||((summary.added||0)+(summary.restored||0));
+function starterReady(){
+  const sources=allSources();
+  if(!sources.length)return starterPicker();
   app.innerHTML=shell(`
-    <section class="starter-ready">
+    <section class="starter-ready onboarding-page">
       <div class="editorial-label">Your sources</div>
-      <h1>Your Long Form issue has something in it.</h1>
-      <div class="editorial-copy">Browse recent headlines before setting up your Kindle. The finished issue will organize eligible articles into fresh sections automatically.</div>
-
-      <div class="ready-edition">
-        <div class="ready-edition-name">${esc(pack.name)}</div>
-        <div class="technical-note">${count} source${count===1?'':'s'} total · editable anytime</div>
-      </div>
-
+      <h1>You're all set.</h1>
+      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. You can always change these later.</div>
+      <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div></div><button class="btn small-btn review-source" data-id="${esc(feed.id)}">•••</button></div>`).join('')}</div>
       <div class="ready-actions">
-        <button class="btn primary" id="starter-preview">Browse latest articles →</button>
-        <button class="btn" id="starter-kindle">Send it to my Kindle</button>
-        <button class="btn" id="starter-another">+ Add another starter</button>
+        <button class="btn" id="starter-another">+ Add another source</button>
+        <button class="btn primary" id="starter-kindle">Continue to Kindle →</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
-
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#starter-preview').onclick=previewModal;
   document.querySelector('#starter-kindle').onclick=onboarding;
   document.querySelector('#starter-another').onclick=starterPicker;
+  wireSourceReviews(app);
 }
 
 function onboarding(){
@@ -629,27 +611,27 @@ function renderSystemHealth(h){
 
 function singleFeedModal(){
   openModal(`<div class="row"><div><div class="editorial-label">Add source</div><h2 class="mt-1">Add a single feed</h2></div><button class="btn small-btn" id="close-modal">Close</button></div>
-    <p class="muted small">Paste a publication's website or RSS address. Long Form will find the feed and add it to your source list.</p>
+    <p class="muted small">Paste a website or RSS address you already read. Long Form will validate the recurring feed before adding it.</p>
     <form id="single-feed-form">
       <div class="field"><label for="single-feed-url">Website or RSS feed</label><input id="single-feed-url" class="input" name="url" required placeholder="https://example.com"></div>
-      <button class="btn primary" id="single-feed-submit">Find & add feed →</button>
+      <button class="btn primary" id="single-feed-submit">Add source →</button>
     </form>`);
   document.querySelector('#close-modal').onclick=closeModal;
   document.querySelector('#single-feed-form').onsubmit=async e=>{
     e.preventDefault();
     const input=String(new FormData(e.currentTarget).get('url')||'').trim();
-    const button=document.querySelector('#single-feed-submit');button.disabled=true;button.textContent='Finding…';
+    const button=document.querySelector('#single-feed-submit');button.disabled=true;button.textContent='Checking…';
     try{
       const result=await api('/discover',{method:'POST',body:{url:input}});
       const feeds=result.feeds||[];
       if(!feeds.length)throw new Error("No RSS or Atom feed found.");
       if(feeds.length===1){
         state=await api('/feeds',{method:'POST',body:{url:feeds[0].url}});
-        closeModal(true);dashboard();toast('Source added');return;
+        closeModal(true);state.settings.onboarding_complete?dashboard():starterPicker();toast('Source added');return;
       }
       chooseFeedModal(feeds);
     }catch(err){
-      button.disabled=false;button.textContent='Find & add feed →';toast(err.message);
+      button.disabled=false;button.textContent='Add source →';toast(err.message);
     }
   };
 }
@@ -661,7 +643,7 @@ function chooseFeedModal(feeds){
   document.querySelector('#close-modal').onclick=closeModal;
   document.querySelectorAll('.choose-discovered-feed').forEach(button=>button.onclick=async()=>{
     const feed=feeds[Number(button.dataset.i)];button.disabled=true;
-    try{state=await api('/feeds',{method:'POST',body:{url:feed.url}});closeModal(true);dashboard();toast('Source added')}
+    try{state=await api('/feeds',{method:'POST',body:{url:feed.url}});closeModal(true);state.settings.onboarding_complete?dashboard():starterPicker();toast('Source added')}
     catch(err){button.disabled=false;toast(err.message)}
   });
 }
@@ -705,7 +687,7 @@ function sourceEditModal(id){
     button.disabled=true;button.textContent='Checking…';
     try{
       state=await api('/feeds/'+id,{method:'PATCH',body:{name:String(form.get('name')||'').trim(),url:String(form.get('url')||'').trim()}});
-      closeModal(true);sourcesExpanded=true;dashboard();toast('Source updated');
+      closeModal(true);if(state.settings.onboarding_complete){sourcesExpanded=true;dashboard()}else starterReady();toast('Source updated');
     }catch(err){button.disabled=false;button.textContent='Save source';toast(err.message)}
   };
 }
@@ -731,7 +713,7 @@ function deleteFeedModal(id){
   openModal(`<h2>Delete feed?</h2><p>This removes <strong>${esc(feed?.name||'this feed')}</strong> from future issues. Past delivery history remains.</p><div class="align-start row wrap"><button class="btn danger" id="confirm-delete">Delete feed</button><button class="btn" id="cancel-delete">Cancel</button></div>`);
   document.querySelector('#cancel-delete').onclick=closeModal;
   document.querySelector('#confirm-delete').onclick=async()=>{
-    try{state=await api('/feeds/'+id,{method:'DELETE'});closeModal(true);dashboard();toast('Feed deleted')}
+    try{state=await api('/feeds/'+id,{method:'DELETE'});closeModal(true);state.settings.onboarding_complete?dashboard():starterReady();toast('Feed deleted')}
     catch(err){toast(err.message)}
   };
 }

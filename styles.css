@@ -318,3 +318,20 @@ footer span { margin-left: auto; }
   .top-actions, .issue-actions, .source-controls, .modal, .toast, .skip-link, footer { display: none; }
   .shell { width: 100%; }
 }
+
+
+/* First-run source onboarding */
+.onboarding-page { max-width: 760px; margin-inline: auto; padding-top: 12px; }
+.source-examples { margin-top: 24px; padding: 16px 0; border-block: 1px solid var(--rule); color: var(--body); font-size: 14px; line-height: 1.7; }
+.source-examples span { display: block; margin-bottom: 6px; color: var(--muted); font: 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+.onboarding-source-list { margin-top: 28px; }
+.onboarding-source-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-block: 16px; border-top: 1px solid var(--rule); }
+.onboarding-source-row > div { min-width: 0; }
+.onboarding-source-row strong { display: block; font-weight: 500; }
+.onboarding-source-row .technical-note { margin-top: 4px; overflow-wrap: anywhere; }
+.onboarding-source-row .review-source { flex: 0 0 auto; }
+.ready-actions { justify-content: space-between; }
+@media (max-width: 520px) {
+  .starter-footer, .ready-actions { align-items: stretch; }
+  .starter-footer .btn, .ready-actions .btn { flex: 1 1 100%; }
+}

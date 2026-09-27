@@ -80,7 +80,7 @@ function renderOpmlPreview(feeds,fileName){
     try{
       const result=await api("/feeds/bulk",{method:"POST",body:{feeds:payload}});
       state=result.dashboard;
-      dashboard();
+      state.settings.onboarding_complete?dashboard():starterPicker();
 
       const summary=result.summary||{};
       const failed=(result.results||[]).filter(x=>x.status==="failed");
