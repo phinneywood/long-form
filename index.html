@@ -263,15 +263,16 @@ async function installStarter(id,button){
 function starterReady(){
   const sources=allSources();
   if(!sources.length)return starterPicker();
+  const kindleSaved=Boolean(state.settings?.kindle_email);
   app.innerHTML=shell(`
     <section class="starter-ready onboarding-page">
       <div class="editorial-label">Your sources</div>
       <h1>Review your sources.</h1>
-      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before connecting Kindle; you can edit or remove them here.</div>
+      <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before ${kindleSaved?'sending your first issue':'connecting Kindle'}; you can edit or remove them here.</div>
       <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div>${feed.last_error?`<div class="feed-error">Last check failed: ${esc(feed.last_error)}</div>`:''}</div><button class="btn small-btn review-source" data-id="${esc(feed.id)}" aria-label="Review ${esc(displayText(feed.name||feed.url))}">Review</button></div>`).join('')}</div>
       <div class="ready-actions">
         <button class="btn" id="starter-another">+ Add another source</button>
-        <button class="btn primary" id="starter-kindle">Continue to Kindle →</button>
+        <button class="btn primary" id="starter-kindle">${kindleSaved?'Continue to first issue':'Continue to Kindle'} →</button>
       </div>
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
@@ -932,6 +933,7 @@ function render(){
   if(state?.settings?.onboarding_complete){dashboard();const active=(state.jobs||[]).find(j=>['queued','running'].includes(j.status));if(active)void watchJob(active.id);return}
   if(feedCount()===0)return starterPicker();
   if(firstRunJob()){dashboard();firstRunDeliveryChoice();return}
+  if(state.settings.kindle_email)return dashboard();
   return starterReady();
 }
 
