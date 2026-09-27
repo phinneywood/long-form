@@ -119,6 +119,7 @@ try{
   assert.equal(await page.locator('.first-issue-reader').getAttribute('sandbox'),'');
   assert.equal(await page.locator('.first-issue-reader').getAttribute('title'),reviewed[0].title);
   assert.match(await page.frameLocator('.first-issue-reader').locator('body').innerText(),/A complete article follows/);
+  assert.ok(await page.frameLocator('.first-issue-reader').locator('body').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=18&&el.scrollWidth<=innerWidth), 'Prepared text must be legible without horizontal scrolling');
   await capture('first-article',width);await page.locator('#close-modal').click();
   await page.locator('#issue-continue').click();await capture('onboarding',width);
   await page.evaluate(()=>{state.settings.kindle_email='reader_sample@kindle.com';state.settings.paused=true;state.jobs=[{id:'first',reason:'manual',status:'queued'}];dashboard();firstRunDeliveryChoice();});await capture('first-delivery-choice',width);

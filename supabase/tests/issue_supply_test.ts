@@ -79,6 +79,10 @@ Deno.test('rejected structured discovery output remains observable for bounded r
   const result=await discoverBeyondRss([], 'History.', {apiKey:'test',deadline:Date.now()+40000,excludedUrls:['https://example.com/old'],fetchImpl:(async()=>Response.json({output:[{content:[{type:'output_text',text:JSON.stringify({articles:[{url:'https://example.com/old',title:'Old',reason:'Already delivered.'}]})}]}]})) as typeof fetch});
   assert(result.open.length===0 && result.report.open.rejected_candidates===1);
 });
+Deno.test('a partly valid discovery batch still replaces candidates rejected before extraction', async () => {
+  const r=await scenario({feeds:[],discover:call=>({related:[],open:[{url:`https://example.com/valid-${call}`,title:'Essay',reason:'Substantial original.'}],report:{related:lane('related'),open:{...lane('open',1),rejected_candidates:call===1?1:0}}})});
+  assert(r.requests.length===2 && r.supply.discovery_articles===2);
+});
 Deno.test('deadline and publisher failures are distinguished from genuinely quiet supply', async () => {
   const expired=await scenario({expired:true});assert(expired.supply.unchecked_sources===1 && expired.requests.length===0);
   const failed=await scenario({failFeed:true});assert(failed.supply.failed_sources===1 && failed.issues.some(i=>i.includes('502')));

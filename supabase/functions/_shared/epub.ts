@@ -261,7 +261,9 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const output = zip.folder("OEBPS")!;
   const cover = await makeCoverJpeg(options, articles.length, buildCoverLines(articles));
-  output.file("cover.jpg", cover);
+  // JPEG/PNG/GIF are already compressed. Deflating them again burns the
+  // worker's CPU budget for negligible savings; keep text compressed below.
+  output.file("cover.jpg", cover, { compression: "STORE" });
 
   const maxAssetBytes = options.maxAssetBytes || 18_000_000;
   const includedAssets = new Map<string, ArticleAsset>();
@@ -390,7 +392,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   let assetIndex = 0;
   for (const asset of includedAssets.values()) {
     assetIndex++;
-    output.file(asset.href, asset.bytes);
+    output.file(asset.href, asset.bytes, { compression: "STORE" });
     manifest.push(`<item id="image-${assetIndex}" href="${esc(asset.href)}" media-type="${asset.mediaType}"/>`);
   }
 

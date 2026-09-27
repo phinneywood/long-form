@@ -251,12 +251,11 @@ export async function prepareIssueSupply(input: {
       ...result.related.map(candidate => ({ candidate, kind: "related" as const })),
       ...result.open.map(candidate => ({ candidate, kind: "open" as const })),
     ];
+    rejectedCandidates = Number(result.report.related.rejected_candidates || 0) + Number(result.report.open.rejected_candidates || 0);
     if (!plan.length) {
-      rejectedCandidates = Number(result.report.related.rejected_candidates || 0) + Number(result.report.open.rejected_candidates || 0);
       if (pass === 0 && rejectedCandidates) continue;
       break; // An empty quality decision is not a reason to pad.
     }
-    rejectedCandidates = 0;
     for (const { candidate, kind } of plan) {
       if (!needsSupplement(selected, supplementCount) || supplementAttempts >= SUPPLY_POLICY.maxSupplementAttempts || Date.now() >= discoveryDeadline) break;
       const url = normalizedArticleUrl(candidate.url);

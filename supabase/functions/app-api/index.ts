@@ -1,7 +1,7 @@
 import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,firstIssueSummary,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
 import {extractArticle,extractionBudget} from "../_shared/article.ts";
 import {editionSchedulePatch} from "../_shared/schedule.ts";
-import {firstIssueInputKey} from "../_shared/first-issue.ts";
+import {firstIssueInputKey,firstIssueInterrupted} from "../_shared/first-issue.ts";
 
 function logEvent(event:string,fields:Record<string,unknown>={},level:"info"|"warn"|"error"="info"){
   const line=JSON.stringify({ts:new Date().toISOString(),service:"app-api",event,...fields});
@@ -71,6 +71,7 @@ Deno.serve(async(req)=>{
     const sourcesChanged=async(job:any)=>job.result?.preview_input_key!==await currentPreviewInputKey();
     if(route==="/first-issue/preview"&&req.method==="GET"){
       const job=await latestPreview();if(!job)return json({preview:null});
+      if(firstIssueInterrupted(job))return json({preview:{...firstIssueSummary(job),status:"failed",error:"Preparation was interrupted. Rebuild your issue to try again; nothing was sent."}});
       if(job.status==="ready"){
         if(await sourcesChanged(job))return json({preview:{...firstIssueSummary(job),status:"stale"}});
         const out=await admin.from("delivery_outbox").select("job_id").eq("job_id",job.id).not("payload","is",null).maybeSingle();if(out.error)throw out.error;
@@ -83,7 +84,14 @@ Deno.serve(async(req)=>{
       if(settings.data.onboarding_complete)return json({error:"Setup is already complete."},409);
       const active=await admin.from("feeds").select("id",{count:"exact",head:true}).eq("user_id",user.id).eq("enabled",true).is("archived_at",null);if(active.error)throw active.error;
       if(!active.count)return json({error:"Add at least one active source first."},400);
-      const prior=await latestPreview();if(prior&&["queued","running"].includes(prior.status))return json({preview:firstIssueSummary(prior)},202);
+      const prior=await latestPreview();
+      if(firstIssueInterrupted(prior)){
+        const recovered=await admin.from("digest_jobs").update({status:"failed",error:"Preparation was interrupted before completion.",finished_at:new Date().toISOString()}).eq("id",prior.id).eq("status","running").eq("started_at",prior.started_at).select("id").maybeSingle();
+        if(recovered.error)throw recovered.error;
+        if(!recovered.data)return json({error:"Preparation changed. Refresh and try again."},409);
+        prior.status="failed";
+      }
+      if(prior&&["queued","running"].includes(prior.status))return json({preview:firstIssueSummary(prior)},202);
       if(prior?.status==="ready"&&!b.refresh&&!await sourcesChanged(prior))return json({preview:firstIssueSummary(prior)},200);
       const created=await admin.from("digest_jobs").insert({user_id:user.id,reason:"first_run_preview",lookback_hours:168,idempotency_key:`first-issue-preview:${user.id}:${crypto.randomUUID()}`,run_after:new Date().toISOString(),result:{preview_input_key:await currentPreviewInputKey()}}).select("*").single();
       if(created.error?.code==="23505"){const active=await latestPreview();if(active)return json({preview:firstIssueSummary(active)},202)}
