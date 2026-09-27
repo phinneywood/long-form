@@ -26,8 +26,9 @@ jobs:
       - name: Load previously validated public entries
         run: |
           mkdir -p /tmp/scoped-feeds
-          if git fetch origin feed-data --depth=1; then
-            git show FETCH_HEAD:nate-ai.xml > /tmp/scoped-feeds/previous.xml
+          if git ls-remote --exit-code --heads origin feed-data >/dev/null; then
+            git fetch origin feed-data:refs/remotes/origin/feed-data --depth=1
+            git show origin/feed-data:nate-ai.xml > /tmp/scoped-feeds/previous.xml
           fi
       - name: Refresh from public publisher metadata
         run: python scripts/publish_nate_feed.py --output /tmp/scoped-feeds/nate-ai.xml --previous /tmp/scoped-feeds/previous.xml
