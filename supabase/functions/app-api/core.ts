@@ -86,7 +86,10 @@ export function firstIssueSummary(job:any){
   const manifest=job.result?.preparation_manifest;
   const groups=manifest?.groups||[];
   const selected=manifest?.pendingItems?.length?[...groups,{section:{name:"Saved articles"},items:manifest.pendingItems}]:groups;
+  const articles=selected.flatMap((group:any)=>group.items||[]);
+  const words=articles.reduce((sum:number,item:any)=>sum+String(item.body||"").replace(/<[^>]*>/g," ").trim().split(/\s+/).filter(Boolean).length,0);
   return {id:job.id,status:job.status,error:job.error||null,created_at:job.created_at,
+    article_count:job.status==="ready"?articles.length:0,estimated_reading_minutes:job.status==="ready"?Math.max(1,Math.ceil(words/225)):null,
     introduction:job.status==="ready"?manifest?.introduction||null:null,
     issues:job.status==="ready"?manifest?.issues||[]:[],
     groups:job.status==="ready"?selected.map((group:any,groupIndex:number)=>({
@@ -101,7 +104,7 @@ export async function systemHealth(userId:string){
   const [settingsR,feedsR,jobsR,articlesR]=await Promise.all([
     admin.from("user_settings").select("paused,onboarding_complete,next_run_at,kindle_email").eq("user_id",userId).single(),
     admin.from("feeds").select("id,name,last_fetch_at,last_success_at,last_error,consecutive_failures,enabled").eq("user_id",userId).eq("enabled",true).is("archived_at",null).order("consecutive_failures",{ascending:false}),
-    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,status,result,error,created_at,started_at,finished_at").eq("user_id",userId).gte("created_at",since).order("created_at",{ascending:false}).limit(100),
+    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,status,result,error,created_at,started_at,finished_at").eq("user_id",userId).neq("reason","first_run_preview").gte("created_at",since).order("created_at",{ascending:false}).limit(100),
     admin.from("article_deliveries").select("id",{count:"exact",head:true}).eq("user_id",userId).gte("delivered_at",since)
   ]);
   if(settingsR.error)throw settingsR.error;if(feedsR.error)throw feedsR.error;if(jobsR.error)throw jobsR.error;if(articlesR.error)throw articlesR.error;
@@ -139,7 +142,7 @@ export async function systemHealth(userId:string){
       repeatedly_failing:repeatedFeeds.length
     },
     alerts,
-    recent_jobs:jobs.slice(0,12),
+    recent_jobs:jobs.slice(0,12).map((j:any)=>({...j,result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
     source_issues:failingFeeds.slice(0,20).map((f:any)=>({id:f.id,name:f.name,last_error:f.last_error,consecutive_failures:f.consecutive_failures||0,last_fetch_at:f.last_fetch_at,last_success_at:f.last_success_at}))
   };
 }

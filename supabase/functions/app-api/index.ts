@@ -1,6 +1,7 @@
 import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,firstIssueSummary,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
 import {extractArticle,extractionBudget} from "../_shared/article.ts";
 import {editionSchedulePatch} from "../_shared/schedule.ts";
+import {firstIssueInputKey} from "../_shared/first-issue.ts";
 
 function logEvent(event:string,fields:Record<string,unknown>={},level:"info"|"warn"|"error"="info"){
   const line=JSON.stringify({ts:new Date().toISOString(),service:"app-api",event,...fields});
@@ -58,7 +59,16 @@ Deno.serve(async(req)=>{
     if(route==="/account"&&req.method==="DELETE"){const{error}=await admin.from("app_users").delete().eq("id",user.id);if(error)throw error;return json({ok:true})}
 
     const latestPreview=async()=>{const r=await admin.from("digest_jobs").select("*").eq("user_id",user.id).eq("reason","first_run_preview").order("created_at",{ascending:false}).limit(1).maybeSingle();if(r.error)throw r.error;return r.data};
-    const sourcesChanged=async(job:any)=>{const r=await admin.from("feeds").select("id").eq("user_id",user.id).gt("updated_at",job.created_at).limit(1);if(r.error)throw r.error;return Boolean(r.data?.length)};
+    const currentPreviewInputKey=async()=>{
+      const [feeds,settings,pending]=await Promise.all([
+        admin.from("feeds").select("id,name,url,enabled,archived_at").eq("user_id",user.id),
+        admin.from("user_settings").select("editorial_brief,editorial_instructions").eq("user_id",user.id).single(),
+        admin.from("pending_issue_articles").select("id,url,section_name").eq("user_id",user.id),
+      ]);
+      if(feeds.error)throw feeds.error;if(settings.error)throw settings.error;if(pending.error)throw pending.error;
+      return firstIssueInputKey(feeds.data||[],settings.data,pending.data||[]);
+    };
+    const sourcesChanged=async(job:any)=>job.result?.preview_input_key!==await currentPreviewInputKey();
     if(route==="/first-issue/preview"&&req.method==="GET"){
       const job=await latestPreview();if(!job)return json({preview:null});
       if(job.status==="ready"){
@@ -75,7 +85,9 @@ Deno.serve(async(req)=>{
       if(!active.count)return json({error:"Add at least one active source first."},400);
       const prior=await latestPreview();if(prior&&["queued","running"].includes(prior.status))return json({preview:firstIssueSummary(prior)},202);
       if(prior?.status==="ready"&&!b.refresh&&!await sourcesChanged(prior))return json({preview:firstIssueSummary(prior)},200);
-      const created=await admin.from("digest_jobs").insert({user_id:user.id,reason:"first_run_preview",lookback_hours:168,idempotency_key:`first-issue-preview:${user.id}:${crypto.randomUUID()}`,run_after:new Date().toISOString()}).select("*").single();if(created.error)throw created.error;
+      const created=await admin.from("digest_jobs").insert({user_id:user.id,reason:"first_run_preview",lookback_hours:168,idempotency_key:`first-issue-preview:${user.id}:${crypto.randomUUID()}`,run_after:new Date().toISOString(),result:{preview_input_key:await currentPreviewInputKey()}}).select("*").single();
+      if(created.error?.code==="23505"){const active=await latestPreview();if(active)return json({preview:firstIssueSummary(active)},202)}
+      if(created.error)throw created.error;
       const kick=await admin.rpc("kick_digest_worker");logEvent("first_issue.prepare_queued",{request_id:requestId,user_id:user.id,job_id:created.data.id,worker_triggered:!kick.error});
       return json({preview:firstIssueSummary(created.data)},202);
     }
@@ -94,7 +106,7 @@ Deno.serve(async(req)=>{
       const repeat=await admin.from("digest_jobs").select("id,reason,status").eq("id",b.job_id).eq("user_id",user.id).maybeSingle();if(repeat.error)throw repeat.error;
       if(repeat.data?.reason==="manual"&&["queued","running","sent","partial","empty"].includes(repeat.data.status))return json({ok:true,job:repeat.data,already_sent_or_queued:true},202);
       const current=await latestPreview();if(!current||current.id!==b.job_id||current.status!=="ready")return json({error:"Review the latest prepared issue before sending."},409);
-      if(await sourcesChanged(current))return json({error:"Your sources changed. Rebuild and review the issue before sending."},409);
+      if(await sourcesChanged(current))return json({error:"Your sources or editor guidance changed. Rebuild and review the issue before sending."},409);
       const settings=await admin.from("user_settings").select("kindle_email,timezone,onboarding_complete").eq("user_id",user.id).single();if(settings.error)throw settings.error;
       if(settings.data.onboarding_complete)return json({error:"Setup is already complete."},409);
       if(!settings.data.kindle_email)return json({error:"Add your Send-to-Kindle address first."},400);

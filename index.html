@@ -270,6 +270,7 @@ function starterReady(){
       <h1>Review your sources.</h1>
       <div class="editorial-copy">${sources.length} recurring source${sources.length===1?'':'s'} added. Review the addresses below before preparing your first issue; you can edit or remove them here.</div>
       <div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div>${feed.last_error?`<div class="feed-error">Last check failed: ${esc(feed.last_error)}</div>`:''}</div><button class="btn small-btn review-source" data-id="${esc(feed.id)}" aria-label="Review ${esc(displayText(feed.name||feed.url))}">Review</button></div>`).join('')}</div>
+      <div class="field"><label for="first-editor-guidance">Anything your AI editor should know?</label><textarea class="input" id="first-editor-guidance" rows="3" maxlength="3000" placeholder="For example: I enjoy science, history, and thoughtful essays.">${esc(state.settings.editorial_brief||'')}</textarea><div class="small muted">Optional. Leave this blank to skip. It guides organization and discovery; your subscribed articles stay intact.</div></div>
       <div class="ready-actions">
         <button class="btn" id="starter-another">+ Add another source</button>
         <button class="btn primary" id="starter-kindle">Preview my first issue →</button>
@@ -277,7 +278,11 @@ function starterReady(){
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
   document.querySelector('#sign-out').onclick=signOut;
-  document.querySelector('#starter-kindle').onclick=firstIssuePage;
+  document.querySelector('#starter-kindle').onclick=async event=>{
+    const button=event.currentTarget,value=document.querySelector('#first-editor-guidance').value.trim();button.disabled=true;
+    try{if(value!==(state.settings.editorial_brief||''))state=await api('/settings',{method:'PATCH',body:{editorial_brief:value}});await firstIssuePage()}
+    catch(err){button.disabled=false;toast(err.message)}
+  };
   document.querySelector('#starter-another').onclick=starterPicker;
   wireSourceReviews(app);
 }
@@ -299,11 +304,12 @@ function showFirstIssue(preview){
   reviewedFirstIssue=preview.status==='ready'?preview:null;
   const working=['queued','running'].includes(preview.status);
   const ready=preview.status==='ready';
-  const title=ready?'Review your first issue.':working?'Preparing your issue.':preview.status==='empty'?'No recent articles found.':preview.status==='expired'?'Your prepared issue expired.':preview.status==='stale'?'Your sources changed.':'We could not prepare this issue.';
+  const title=ready?'Review your first issue.':working?'Preparing your issue.':preview.status==='empty'?'No recent articles found.':preview.status==='expired'?'Your prepared issue expired.':preview.status==='stale'?'Your reading changed.':'We could not prepare this issue.';
   const groups=ready?(preview.groups||[]):[];
   app.innerHTML=shell(`<section class="first-issue-page onboarding-page">
     <div class="editorial-label">Your first issue · ${ready?'Review':'Preparation'}</div><h1>${title}</h1>
-    <p class="editorial-copy" role="status">${ready?'This is the prepared issue you can send to Kindle. Review the selected articles and read any of them before continuing. Sending uses this saved issue.':working?'Collecting and formatting articles from your sources. This may take several minutes.':preview.status==='empty'?'Try adding more sources or preparing again later.':preview.status==='stale'?'Rebuild the issue to include your latest source changes.':esc(preview.error||'Try again or review your sources.')}</p>
+    <p class="editorial-copy" role="status">${ready?'This is the prepared issue you can send to Kindle. Review the selected articles and read any of them before continuing. Sending uses this saved issue.':working?'Collecting and formatting articles from your sources. This may take several minutes.':preview.status==='empty'?'Try adding more sources or preparing again later.':preview.status==='stale'?'Rebuild the issue to include your latest source, article, or editor changes.':esc(preview.error||'Try again or review your sources.')}</p>
+    ${ready?`<p class="technical-note">${preview.article_count??groups.reduce((n,g)=>n+g.items.length,0)} articles${preview.estimated_reading_minutes?` · About ${preview.estimated_reading_minutes} minutes of reading. An estimate, not a limit.`:''}</p>`:''}
     ${ready&&preview.introduction?`<div class="first-issue-intro"><div class="micro-label">From your editor</div><p>${esc(preview.introduction)}</p></div>`:''}
     ${ready?groups.map(group=>`<section class="first-issue-group"><h2>${esc(group.name)}</h2>${group.items.map(item=>`<article class="first-issue-item"><h3>${esc(item.title)}</h3>${item.source?`<div class="technical-note">${esc(item.source)}</div>`:''}${item.excerpt?`<p>${esc(item.excerpt)}</p>`:''}${(item.warnings||[]).map(w=>`<p class="notice info">${esc(w)}</p>`).join('')}<button class="btn small-btn read-first-article" data-group="${item.groupIndex}" data-index="${item.index}">Read article →</button></article>`).join('')}</section>`).join(''):''}
     ${ready&&(preview.issues||[]).length?`<div class="notice info">${preview.issues.map(esc).join('<br>')}</div>`:''}
