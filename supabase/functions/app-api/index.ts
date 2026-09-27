@@ -1,4 +1,4 @@
-import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
+import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,firstIssueSummary,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
 import {extractArticle,extractionBudget} from "../_shared/article.ts";
 import {editionSchedulePatch} from "../_shared/schedule.ts";
 
@@ -56,6 +56,56 @@ Deno.serve(async(req)=>{
     if(route==="/system"&&req.method==="GET"){const health=await systemHealth(user.id);logEvent("system.health_viewed",{request_id:requestId,user_id:user.id,alerts:health.alerts.length});return json(health)}
     if(route==="/export"&&req.method==="GET")return json({exported_at:new Date().toISOString(),...await dashboard(user.id,user.email)});
     if(route==="/account"&&req.method==="DELETE"){const{error}=await admin.from("app_users").delete().eq("id",user.id);if(error)throw error;return json({ok:true})}
+
+    const latestPreview=async()=>{const r=await admin.from("digest_jobs").select("*").eq("user_id",user.id).eq("reason","first_run_preview").order("created_at",{ascending:false}).limit(1).maybeSingle();if(r.error)throw r.error;return r.data};
+    const sourcesChanged=async(job:any)=>{const r=await admin.from("feeds").select("id").eq("user_id",user.id).gt("updated_at",job.created_at).limit(1);if(r.error)throw r.error;return Boolean(r.data?.length)};
+    if(route==="/first-issue/preview"&&req.method==="GET"){
+      const job=await latestPreview();if(!job)return json({preview:null});
+      if(job.status==="ready"){
+        if(await sourcesChanged(job))return json({preview:{...firstIssueSummary(job),status:"stale"}});
+        const out=await admin.from("delivery_outbox").select("job_id").eq("job_id",job.id).not("payload","is",null).maybeSingle();if(out.error)throw out.error;
+        if(!out.data)return json({preview:{...firstIssueSummary(job),status:"expired"}});
+      }
+      return json({preview:firstIssueSummary(job)});
+    }
+    if(route==="/first-issue/prepare"&&req.method==="POST"){
+      const b=await req.json().catch(()=>({})),settings=await admin.from("user_settings").select("onboarding_complete").eq("user_id",user.id).single();if(settings.error)throw settings.error;
+      if(settings.data.onboarding_complete)return json({error:"Setup is already complete."},409);
+      const active=await admin.from("feeds").select("id",{count:"exact",head:true}).eq("user_id",user.id).eq("enabled",true).is("archived_at",null);if(active.error)throw active.error;
+      if(!active.count)return json({error:"Add at least one active source first."},400);
+      const prior=await latestPreview();if(prior&&["queued","running"].includes(prior.status))return json({preview:firstIssueSummary(prior)},202);
+      if(prior?.status==="ready"&&!b.refresh&&!await sourcesChanged(prior))return json({preview:firstIssueSummary(prior)},200);
+      const created=await admin.from("digest_jobs").insert({user_id:user.id,reason:"first_run_preview",lookback_hours:168,idempotency_key:`first-issue-preview:${user.id}:${crypto.randomUUID()}`,run_after:new Date().toISOString()}).select("*").single();if(created.error)throw created.error;
+      const kick=await admin.rpc("kick_digest_worker");logEvent("first_issue.prepare_queued",{request_id:requestId,user_id:user.id,job_id:created.data.id,worker_triggered:!kick.error});
+      return json({preview:firstIssueSummary(created.data)},202);
+    }
+    const articleMatch=route.match(/^\/first-issue\/article\/([0-9a-f-]+)\/(\d+)\/(\d+)$/i);
+    if(articleMatch&&req.method==="GET"){
+      const row=await admin.from("digest_jobs").select("status,reason,result").eq("id",articleMatch[1]).eq("user_id",user.id).single();if(row.error)return json({error:"Prepared article not found."},404);
+      if(row.data.status!=="ready"||row.data.reason!=="first_run_preview")return json({error:"The issue is not ready for review."},409);
+      const manifest=row.data.result?.preparation_manifest;
+      const selected=Number(articleMatch[2])===(manifest?.groups||[]).length?manifest?.pendingItems:manifest?.groups?.[Number(articleMatch[2])]?.items;
+      const item=selected?.[Number(articleMatch[3])];
+      if(!item)return json({error:"Prepared article not found."},404);
+      return json({title:item.title,url:validUrl(String(item.url||""))?item.url:null,body:item.body||"",warnings:item.warnings||[]});
+    }
+    if(route==="/first-issue/send"&&req.method==="POST"){
+      const b=await req.json().catch(()=>({}));if(!/^[0-9a-f-]{36}$/i.test(String(b.job_id||"")))return json({error:"Invalid prepared issue."},400);
+      const repeat=await admin.from("digest_jobs").select("id,reason,status").eq("id",b.job_id).eq("user_id",user.id).maybeSingle();if(repeat.error)throw repeat.error;
+      if(repeat.data?.reason==="manual"&&["queued","running","sent","partial","empty"].includes(repeat.data.status))return json({ok:true,job:repeat.data,already_sent_or_queued:true},202);
+      const current=await latestPreview();if(!current||current.id!==b.job_id||current.status!=="ready")return json({error:"Review the latest prepared issue before sending."},409);
+      if(await sourcesChanged(current))return json({error:"Your sources changed. Rebuild and review the issue before sending."},409);
+      const settings=await admin.from("user_settings").select("kindle_email,timezone,onboarding_complete").eq("user_id",user.id).single();if(settings.error)throw settings.error;
+      if(settings.data.onboarding_complete)return json({error:"Setup is already complete."},409);
+      if(!settings.data.kindle_email)return json({error:"Add your Send-to-Kindle address first."},400);
+      const localDate=new Intl.DateTimeFormat("en-CA",{timeZone:settings.data.timezone||"UTC",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+      const key=`daily-issue:${user.id}:${localDate}`;
+      const existing=await admin.from("digest_jobs").select("id").eq("idempotency_key",key).maybeSingle();if(existing.error)throw existing.error;
+      if(existing.data&&existing.data.id!==current.id)return json({error:"An issue is already queued or sent today."},409);
+      const queued=await admin.rpc("queue_first_issue",{p_user_id:user.id,p_job_id:current.id,p_email:settings.data.kindle_email,p_idempotency_key:key});if(queued.error)throw queued.error;
+      const kick=await admin.rpc("kick_digest_worker");
+      return json({ok:true,job:{id:current.id,reason:"manual",status:"queued"},worker_triggered:!kick.error},202);
+    }
 
     if(route==="/settings"&&req.method==="PATCH"){
       const b=await req.json().catch(()=>({}));const {data:cur,error:ce}=await admin.from("user_settings").select("*").eq("user_id",user.id).single();if(ce)throw ce;const p:any={};

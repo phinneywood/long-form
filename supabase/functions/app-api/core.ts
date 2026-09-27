@@ -67,7 +67,7 @@ export async function dashboard(userId:string,email:string){
     admin.from("sections").select("*").eq("user_id",userId).is("archived_at",null).order("position").order("created_at"),
     admin.from("feeds").select("*").eq("user_id",userId).is("archived_at",null).order("created_at"),
     admin.from("digests").select("id,section_id,edition_name,status,article_count,error,created_at,sent_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(25),
-    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,article_urls,status,result,error,attempts,run_after,created_at,started_at,finished_at").eq("user_id",userId).order("created_at",{ascending:false}).limit(15)
+    admin.from("digest_jobs").select("id,reason,section_id,edition_name,scheduled_for,packet_name,article_urls,status,result,error,attempts,run_after,created_at,started_at,finished_at").eq("user_id",userId).neq("reason","first_run_preview").order("created_at",{ascending:false}).limit(15)
   ]);
   if(s.error)throw s.error;if(se.error)throw se.error;if(fe.error)throw fe.error;if(di.error)throw di.error;if(jo.error)throw jo.error;
   const sources=fe.data||[];
@@ -78,9 +78,23 @@ export async function dashboard(userId:string,email:string){
     sources,
     sections,
     digests:di.data||[],
-    jobs:jo.data||[],
+    jobs:(jo.data||[]).map((j:any)=>({...j,result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
     sender_email:"reader@antonioskilton.com"
   };
+}
+export function firstIssueSummary(job:any){
+  const manifest=job.result?.preparation_manifest;
+  const groups=manifest?.groups||[];
+  const selected=manifest?.pendingItems?.length?[...groups,{section:{name:"Saved articles"},items:manifest.pendingItems}]:groups;
+  return {id:job.id,status:job.status,error:job.error||null,created_at:job.created_at,
+    introduction:job.status==="ready"?manifest?.introduction||null:null,
+    issues:job.status==="ready"?manifest?.issues||[]:[],
+    groups:job.status==="ready"?selected.map((group:any,groupIndex:number)=>({
+      name:group.section?.name||"Reading",items:(group.items||[]).map((item:any,index:number)=>({
+        groupIndex,index,title:item.title||"Untitled",source:item.source||item.feed_name||item.source_name||null,
+        url:item.url,excerpt:item.excerpt||null,warnings:item.warnings||[]
+      }))
+    })):[]};
 }
 export async function systemHealth(userId:string){
   const since=new Date(Date.now()-24*3600_000).toISOString();

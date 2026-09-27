@@ -329,6 +329,14 @@ footer span { margin-left: auto; }
 
 /* First-run source onboarding */
 .onboarding-page { max-width: 760px; margin-inline: auto; padding-top: 12px; }
+.first-issue-intro { margin: 32px 0; padding: 24px; background: var(--surface); border-left: 3px solid var(--accent); }
+.first-issue-intro p { margin-bottom: 0; font-family: var(--serif); font-size: 20px; }
+.first-issue-group { margin: 44px 0 24px; border-top: 1px solid var(--rule); padding-top: 20px; }
+.first-issue-item { padding: 22px 0; border-bottom: 1px solid var(--rule); overflow-wrap: anywhere; }
+.first-issue-item h3 { font-size: 23px; }
+.first-issue-item p { margin: 10px 0; }
+.first-issue-reader { display: block; width: 100%; height: min(75vh, 850px); border: 1px solid var(--rule); background: #fff; }
+@media(max-width: 600px) { .first-issue-intro { padding: 16px; } .first-issue-reader { height: 70vh; } }
 .source-examples { margin-top: 24px; padding: 16px 0; border-block: 1px solid var(--rule); color: var(--body); font-size: 14px; line-height: 1.7; }
 .source-examples span { display: block; margin-bottom: 6px; color: var(--muted); font: 10px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .05em; }
 .onboarding-source-list { margin-top: 28px; }
