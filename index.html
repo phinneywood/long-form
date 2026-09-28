@@ -1005,6 +1005,7 @@ function oneTimeKindleSetup(){
 }
 function exactResendModal(job){
   const title=job.result?.edition_title||job.edition_name||'Long Form issue';
+  const resendKey=`/resend:${job.id}`;if(!pendingSends.has(resendKey))pendingSends.set(resendKey,crypto.randomUUID());
   openModal(`<div class="row"><div><div class="editorial-label">Delivery history</div><h2 class="mt-1">Resend exact issue?</h2></div><button class="btn small-btn" id="close-modal">Close</button></div>
     <p><strong>${esc(title)}</strong></p>
     <p class="muted small">This sends the frozen EPUB exactly as it was originally submitted, including its images and article selection. Later source or editor changes are not applied. The current saved Kindle address will be used.</p>
@@ -1013,8 +1014,8 @@ function exactResendModal(job){
   document.querySelector('#confirm-resend').onclick=async event=>{
     const button=event.currentTarget;button.disabled=true;button.textContent='Queuing…';
     try{
-      const result=await api('/resend',{method:'POST',body:{job_id:job.id,request_id:crypto.randomUUID()}});
-      state.jobs=[result.job,...(state.jobs||[]).filter(item=>item.id!==result.job.id)];
+      const result=await api('/resend',{method:'POST',body:{job_id:job.id,request_id:pendingSends.get(resendKey)}});
+      pendingSends.delete(resendKey);state.jobs=[result.job,...(state.jobs||[]).filter(item=>item.id!==result.job.id)];
       closeModal(true);dashboard();showJobProgress(result,'Issue queued for resend');void watchJob(result.job.id);
     }catch(err){button.disabled=false;button.textContent='Resend issue';toast(err.message)}
   };
