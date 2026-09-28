@@ -8,19 +8,26 @@ Deno.env.set("OPENAI_API_KEY", "test-only-key");
 const { processJob, handleWorkerRequest } = await import("../functions/worker/core.ts");
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 
-async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview") {
+async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview" | "resend") {
   const original = globalThis.fetch;
   const job: any = { id: "job-1", user_id: "user-1", status: "queued", attempts: mode === "failed" ? 2 : 0, reason: "manual", created_at: new Date().toISOString(), lookback_hours: 168 };
   if(mode === "scheduled" || mode === "rescheduled")Object.assign(job,{reason:"scheduled",section_id:"section-1",schedule_version:1,lookback_hours:192});
   if(mode === "test")Object.assign(job,{reason:"test",lookback_hours:168});
   if(mode === "first_run_preview")Object.assign(job,{reason:"first_run_preview"});
-  let outbox: any = null, sends = 0, failFinalUpdate = mode === "retry", failOutboxInsert = mode === "prepare_retry";
+  if(mode === "resend")Object.assign(job,{reason:"manual",result:{resend_of_job_id:"source-job",resend_of_created_at:"2026-09-27T12:00:00Z",resend_of_title:"Long Form — September 27, 2026"}});
+  let outbox: any = mode === "resend" ? {
+    job_id:job.id,first_send_at:null,provider_email_id:null,payload:{
+      email:{from:"Long Form <reader@antonioskilton.com>",to:["test@example.com"],subject:"Long Form — September 27, 2026",text:"Your Long Form edition is attached.",attachments:[{filename:"long-form-2026-09-27.epub",content:"frozen-epub-bytes",content_type:"application/epub+zip"}]},
+      groups:[{section:{id:null,name:"Original issue"},items:[{article_hash:"hash-1",canonical_url:"https://example.com/original",title:"Original article",pending_id:"pending-original",warnings:[]}]}],
+      feedCount:1,issues:[],editorial:{organization:{status:"edited"}},qa:{contentsEntries:1},media:{embedded:1}
+    }
+  } : null, sends = 0, failFinalUpdate = mode === "retry", failOutboxInsert = mode === "prepare_retry";
   const feedUpdates: any[] = [];
   const good = { id: "feed-1", user_id: job.user_id, section_id: "section-1", name: "Example", url: "https://8.8.8.8/feed" };
   const bad = { ...good, id: "feed-2", name: "Broken source", url: "https://8.8.8.8/broken" };
   const feeds = mode === "empty" ? [] : mode === "failed" ? [bad] : mode === "partial" ? [good, bad] : mode === "scheduled" ? [good,{...bad,section_id:"section-2"}] : [good];
   const fetched: string[]=[];
-  let articleDeliveryReads = 0, articleDeliveryWrites = 0;
+  let articleDeliveryReads = 0, articleDeliveryWrites = 0, pendingDeletes = 0;
   const snapshots: string[] = [];
   const manifestWrites: any[] = [];
   const continuations: string[] = [];
@@ -92,7 +99,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
     }
     else if (table === "feeds") { if (body) feedUpdates.push(body);else rows = feeds; }
     else if (table === "digests") rows = [{ id: "digest-1" }];
-    else if (table === "pending_issue_articles") rows = [];
+    else if (table === "pending_issue_articles") { if(req.method === "DELETE")pendingDeletes++;rows = []; }
     else if (table === "article_deliveries") {
       if (req.method === "GET") articleDeliveryReads++;
       else articleDeliveryWrites++;
@@ -129,7 +136,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       assert(outbox.payload.email.attachments[0].content === previewAttachment, "Sending must reuse frozen EPUB bytes");
       assert(fetched.length === fetchedBeforeSend, "Sending a reviewed issue must not fetch or extract again");
     }
-    return { initial, first, continuations, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, manifestWrites, editorRequests, previewAttachment };
+    return { initial, first, continuations, sendsAfterInitial, manifestsAfterInitial, job, outbox, sends, feedUpdates, snapshots, fetched, articleDeliveryReads, articleDeliveryWrites, pendingDeletes, manifestWrites, editorRequests, previewAttachment };
   } finally { globalThis.fetch = original; }
 }
 
@@ -219,6 +226,18 @@ Deno.test("stale recovery terminalizes exhausted jobs and requeues retryable job
   } finally { globalThis.fetch = original; }
 });
 
+
+Deno.test("exact resend reuses the frozen outbox without rebuilding or consuming reading state", async () => {
+  const result = await scenario("resend");
+  assert(result.job.status === "sent", JSON.stringify(result.first));
+  assert(result.sends === 1, "resend should submit exactly one frozen email");
+  assert(result.fetched.length === 0, "resend must not refetch feeds, articles, or images");
+  assert(result.manifestWrites.length === 0, "resend must not prepare a new manifest");
+  assert(result.articleDeliveryReads === 0 && result.articleDeliveryWrites === 0, "resend must not read or consume recurring delivery history");
+  assert(result.pendingDeletes === 0, "resend must not consume saved articles");
+  assert(result.outbox.payload.email.attachments[0].content === "frozen-epub-bytes", "resend must reuse the exact frozen attachment");
+  assert(result.job.result.resend_of_job_id === "source-job", "resend provenance must survive final status recording");
+});
 
 Deno.test("explicit test sends are uniquely reviewable on Kindle without consuming recurring delivery history", async () => {
   const result = await scenario("test");
