@@ -723,7 +723,7 @@ function renderSystemHealth(h){
       <section class="system-section">
         <div class="editorial-label">Recent jobs</div>
         <h2>Delivery runs</h2>
-        <div class="system-list">${jobs.length?jobs.map(j=>`<div class="system-row"><div><div class="system-row-title">${esc(j.reason==='scheduled'?(j.edition_name||'Scheduled delivery'):j.reason==='test'?'Test delivery':j.reason==='one_time'?(j.packet_name||'Next issue'):'Manual delivery')}</div><div class="system-row-meta">${esc(String(j.id).slice(0,8))} · ${esc(fmtDate(j.created_at))}${j.started_at&&j.finished_at?' · '+esc(fmtDuration(new Date(j.finished_at)-new Date(j.started_at))):''}</div>${j.error?`<div class="system-row-error">${esc(j.error)}</div>`:''}</div><div class="system-job-status ${esc(j.status)}">${esc(j.status)}</div></div>`).join(''):'<div class="empty">No jobs in the last 24 hours.</div>'}</div>
+        <div class="system-list">${jobs.length?jobs.map(j=>`<div class="system-row"><div><div class="system-row-title">${esc(j.result?.resend_of_job_id?'Resent delivery':j.reason==='scheduled'?(j.edition_name||'Scheduled delivery'):j.reason==='test'?'Test delivery':j.reason==='one_time'?(j.packet_name||'Next issue'):'Manual delivery')}</div><div class="system-row-meta">${esc(String(j.id).slice(0,8))} · ${esc(fmtDate(j.created_at))}${j.started_at&&j.finished_at?' · '+esc(fmtDuration(new Date(j.finished_at)-new Date(j.started_at))):''}</div>${j.error?`<div class="system-row-error">${esc(j.error)}</div>`:''}</div><div class="system-job-status ${esc(j.status)}">${esc(j.status)}</div></div>`).join(''):'<div class="empty">No jobs in the last 24 hours.</div>'}</div>
       </section>
 
       <section class="system-section">
@@ -1003,13 +1003,30 @@ function oneTimeKindleSetup(){
     }catch(err){toast(err.message);button.disabled=false}
   };
 }
+function exactResendModal(job){
+  const title=job.result?.edition_title||job.edition_name||'Long Form issue';
+  openModal(`<div class="row"><div><div class="editorial-label">Delivery history</div><h2 class="mt-1">Resend exact issue?</h2></div><button class="btn small-btn" id="close-modal">Close</button></div>
+    <p><strong>${esc(title)}</strong></p>
+    <p class="muted small">This sends the frozen EPUB exactly as it was originally submitted, including its images and article selection. Later source or editor changes are not applied. The current saved Kindle address will be used.</p>
+    <button class="btn primary" id="confirm-resend">Resend issue</button>`);
+  document.querySelector('#close-modal').onclick=closeModal;
+  document.querySelector('#confirm-resend').onclick=async event=>{
+    const button=event.currentTarget;button.disabled=true;button.textContent='Queuing…';
+    try{
+      const result=await api('/resend',{method:'POST',body:{job_id:job.id,request_id:crypto.randomUUID()}});
+      state.jobs=[result.job,...(state.jobs||[]).filter(item=>item.id!==result.job.id)];
+      closeModal(true);dashboard();showJobProgress(result,'Issue queued for resend');void watchJob(result.job.id);
+    }catch(err){button.disabled=false;button.textContent='Resend issue';toast(err.message)}
+  };
+}
 async function historyModal(){
   const version=openModal('<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p>Loading recent sends…</p>');
   document.querySelector('#close-modal').onclick=closeModal;
   try{state=await api('/me')}catch(err){if(version===modalVersion)toast(err.message)}
   if(version!==modalVersion)return;
-  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.result?.edition_title||job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${issueSupplyDetails(job)}${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
+  openModal(`<div class="row"><h2>Delivery history</h2><button class="btn small-btn" id="close-modal">Close</button></div><p class="muted small">Most recent 15 sends. Submitted means accepted by the email provider; Kindle arrival is not verified.</p><div class="preview-list">${(state.jobs||[]).map(job=>`<div class="preview-item"><strong>${esc(job.result?.edition_title||job.packet_name||job.edition_name||({scheduled:'Daily issue',manual:'Manual issue',test:'Test issue'})[job.reason]||'Issue')}</strong> ${runBadge(job.status)}<p class="small">${esc(fmtDate(job.created_at))} · ${esc(jobProgressText(job))}</p>${issueSupplyDetails(job)}${(job.result?.issues||[]).map(issue=>`<p class="notice info">${esc(issue)}</p>`).join('')}${job.can_resend?`<button class="btn small-btn exact-resend" data-id="${job.id}">Resend exact issue</button>`:''}${job.reason==='one_time'&&job.article_urls?.length?`<button class="btn small-btn resend-packet" data-id="${job.id}">Review & add to next issue</button>`:''}</div>`).join('')||'<p>No sends yet.</p>'}</div><button class="btn small-btn" id="refresh-history">Refresh status</button>`);
   document.querySelector('#close-modal').onclick=closeModal;document.querySelector('#refresh-history').onclick=historyModal;
+  modal.querySelectorAll('.exact-resend').forEach(button=>button.onclick=()=>{const job=state.jobs.find(j=>j.id===button.dataset.id);if(job)exactResendModal(job)});
   modal.querySelectorAll('.resend-packet').forEach(button=>button.onclick=()=>{const job=state.jobs.find(j=>j.id===button.dataset.id);oneTimeEditionModal({name:job.packet_name,urls:job.article_urls.join('\n'),request_id:crypto.randomUUID()})});
 }
 function render(){
