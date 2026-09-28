@@ -128,6 +128,13 @@ test('background polling refreshes the dashboard after the dialog closes', async
   assert.match(result, /Submitted with omissions/);
 });
 
+test('delivery history queues an exact recurring resend only after confirmation', async () => {
+  const result = await run(`state.jobs=[{id:'11111111-1111-4111-8111-111111111111',status:'sent',reason:'scheduled',can_resend:true,created_at:'2026-09-27T12:00:00Z',result:{articles:4,edition_title:'Long Form — September 27, 2026'}}];let request;watchJob=async()=>{};api=async(path,options)=>{if(path==='/me')return state;if(path==='/resend'){request={path,body:options.body};return {job:{id:'22222222-2222-4222-8222-222222222222',status:'queued',reason:'manual',created_at:'2026-09-28T12:00:00Z',result:{resend_of_job_id:options.body.job_id}}}};throw new Error('Unexpected '+path)};await historyModal();document.querySelector('.exact-resend').click();const confirmation=modal.textContent;const button=document.querySelector('#confirm-resend');await button.onclick({currentTarget:button});return {confirmation,request,progress:modal.textContent,queued:state.jobs[0]}`);
+  assert.match(result.confirmation,/Resend exact issue/);assert.match(result.confirmation,/frozen EPUB exactly as it was originally submitted/);
+  assert.equal(result.request.path,'/resend');assert.equal(result.request.body.job_id,'11111111-1111-4111-8111-111111111111');assert.match(result.request.body.request_id,/^[a-f0-9-]{36}$/);
+  assert.match(result.progress,/Issue queued for resend/);assert.equal(result.queued.result.resend_of_job_id,'11111111-1111-4111-8111-111111111111');
+});
+
 test('history lists omissions and creates a newly reviewed resend', async () => {
   const result = await run(`state.jobs=[{id:'j1',status:'partial',reason:'one_time',packet_name:'Weekend',article_urls:['https://example.com/a'],created_at:'2026-09-19',result:{articles:1,issues:['An image was omitted']}}];api=async()=>state;await historyModal();const visible=modal.textContent.includes('An image was omitted');document.querySelector('.resend-packet').click();return {visible,name:document.querySelector('#one-time-name').value,request:oneTimeDraft.request_id}`);
   assert.ok(result.visible);assert.equal(result.name, 'Weekend');assert.match(result.request, /^[a-f0-9-]{36}$/);
