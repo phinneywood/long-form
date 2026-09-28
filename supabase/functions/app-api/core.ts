@@ -71,6 +71,14 @@ export async function dashboard(userId:string,email:string){
   ]);
   if(s.error)throw s.error;if(se.error)throw se.error;if(fe.error)throw fe.error;if(di.error)throw di.error;if(jo.error)throw jo.error;
   const sources=fe.data||[];
+  const jobs=jo.data||[];
+  const resendCandidates=jobs.filter((j:any)=>["scheduled","manual"].includes(j.reason)&&["sent","partial"].includes(j.status)).map((j:any)=>j.id);
+  const resendable=new Set<string>();
+  if(resendCandidates.length){
+    const outboxes=await admin.from("delivery_outbox").select("job_id").in("job_id",resendCandidates).not("payload","is",null);
+    if(outboxes.error)throw outboxes.error;
+    for(const row of outboxes.data||[])resendable.add(row.job_id);
+  }
   const sections=(se.data||[]).map((x:any)=>({...x,feeds:sources.filter((f:any)=>f.section_id===x.id)}));
   return{
     user:{id:userId,email},
@@ -78,7 +86,7 @@ export async function dashboard(userId:string,email:string){
     sources,
     sections,
     digests:di.data||[],
-    jobs:(jo.data||[]).map((j:any)=>({...j,result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
+    jobs:jobs.map((j:any)=>({...j,can_resend:resendable.has(j.id),result:j.result?.preparation_manifest?{...j.result,preparation_manifest:undefined}:j.result})),
     sender_email:"reader@antonioskilton.com"
   };
 }

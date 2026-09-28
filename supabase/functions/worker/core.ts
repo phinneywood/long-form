@@ -132,7 +132,7 @@ async function digestForGroup(job: any, group: { section: any; items: EpubArticl
   }
   // Explicit test sends verify the live pipeline without consuming articles from
   // the reader's next real issue.
-  if (job.reason === "test") return;
+  if (job.reason === "test" || job.result?.resend_of_job_id) return;
   const deliveries = group.items.map((article) => ({
     user_id: job.user_id,
     feed_id: article.feed_id || null,
@@ -455,7 +455,9 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     }
     const { build, providerId } = await dispatchPrepared({
       load: async () => { const r = await admin.from("delivery_outbox").select("*").eq("job_id", job.id).maybeSingle(); if (r.error) throw r.error; return r.data; },
-      prepare: () => prepareDeliveryPayload(job, deadline),
+      prepare: () => job.result?.resend_of_job_id
+        ? Promise.reject(new DeliveryNeedsReview("The frozen resend payload is missing; nothing was sent."))
+        : prepareDeliveryPayload(job, deadline),
       freeze: async payload => { const r = await admin.from("delivery_outbox").insert({ job_id: job.id, payload }).select("*").single(); if (r.error) throw r.error; return r.data; },
       markAttempt: async at => { const r = await admin.from("delivery_outbox").update({ first_send_at: at }).eq("job_id", job.id); if (r.error) throw r.error; },
       send: email => sendResend(email, job.id),
@@ -475,13 +477,18 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     const pendingIds: string[] = build.groups.flatMap((group: any) => group.items.flatMap((item: any) => [item.pending_id, ...(item.pending_ids || [])]).filter(Boolean));
     const frozenPending = (build as any).pendingItems || [];
     pendingIds.push(...frozenPending.flatMap((item: any) => [item.pending_id, ...(item.pending_ids || [])]).filter(Boolean));
-    if (job.reason !== "test" && pendingIds.length) {
+    if (job.reason !== "test" && !job.result?.resend_of_job_id && pendingIds.length) {
       const deletion = await admin.from("pending_issue_articles").delete().eq("user_id", job.user_id).in("id", [...new Set(pendingIds)]);
       if (deletion.error) throw deletion.error;
     }
     const warningMessages = [...new Set<string>(build.groups.flatMap(group => group.items.flatMap((article: any) => article.warnings || [])))];
     const status = build.issues.length || warningMessages.length ? "partial" : "sent";
-    const finished = await admin.from("digest_jobs").update({ status, finished_at: new Date().toISOString(), result: { articles: total, sections: build.groups.length, feeds: build.feedCount, provider_email_id: providerId, packet_name: job.packet_name || null, edition_title: build.email.subject || null, warnings: warningMessages.length, issues: [...build.issues, ...warningMessages].slice(0, 30), editorial: (build as any).editorial || null, qa: (build as any).qa || null, media: (build as any).media || null } }).eq("id", job.id);
+    const resendMeta = job.result?.resend_of_job_id ? {
+      resend_of_job_id: job.result.resend_of_job_id,
+      resend_of_created_at: job.result.resend_of_created_at || null,
+      resend_of_title: job.result.resend_of_title || null,
+    } : {};
+    const finished = await admin.from("digest_jobs").update({ status, finished_at: new Date().toISOString(), result: { ...resendMeta, articles: total, sections: build.groups.length, feeds: build.feedCount, provider_email_id: providerId, packet_name: job.packet_name || null, edition_title: build.email.subject || null, warnings: warningMessages.length, issues: [...build.issues, ...warningMessages].slice(0, 30), editorial: (build as any).editorial || null, qa: (build as any).qa || null, media: (build as any).media || null } }).eq("id", job.id);
     if (finished.error) throw finished.error;
     logEvent("digest.submitted", { job_id: job.id, user_id: job.user_id, status, articles: total, duration_ms: Math.round(performance.now() - started) });
     return { job: job.id, status, articles: total, sections: build.groups.length };

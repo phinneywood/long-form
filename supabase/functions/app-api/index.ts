@@ -314,6 +314,26 @@ Deno.serve(async(req)=>{
       logEvent("next_issue.articles_added",{request_id:requestId,user_id:user.id,name,articles:urls.length});
       return json({ok:true,queued_for_next_issue:true,articles:urls.length,name},202);
     }
+    if(route==="/resend"&&req.method==="POST"){
+      const b=await req.json().catch(()=>({})),sourceJobId=String(b.job_id||""),requestId=String(b.request_id||crypto.randomUUID());
+      if(!/^[0-9a-f-]{36}$/i.test(sourceJobId)||!/^[0-9a-f-]{36}$/i.test(requestId))return json({error:"Invalid resend request."},400);
+      const{data:s,error:settingsError}=await admin.from("user_settings").select("kindle_email").eq("user_id",user.id).single();if(settingsError)throw settingsError;
+      if(!s?.kindle_email)return json({error:"Add your Send-to-Kindle email first."},400);
+      const source=await admin.from("digest_jobs").select("id,reason,status").eq("id",sourceJobId).eq("user_id",user.id).maybeSingle();if(source.error)throw source.error;
+      if(!source.data)return json({error:"Delivery not found."},404);
+      if(!["sent","partial"].includes(source.data.status))return json({error:"Only submitted issues can be resent."},409);
+      if(!["scheduled","manual"].includes(source.data.reason))return json({error:"This delivery type cannot be resent as an exact issue."},400);
+      const key=`resend:${user.id}:${sourceJobId}:${requestId}`;
+      const queued=await admin.rpc("queue_resend_issue",{p_user_id:user.id,p_source_job_id:sourceJobId,p_email:s.kindle_email,p_idempotency_key:key});
+      if(queued.error){
+        if(String(queued.error.message||"").includes("no longer available"))return json({error:"The frozen issue has expired and can no longer be resent exactly."},409);
+        throw queued.error;
+      }
+      const job=await admin.from("digest_jobs").select("id,status,reason,created_at,result").eq("id",queued.data).eq("user_id",user.id).single();if(job.error)throw job.error;
+      const{data:kick,error:kickError}=await admin.rpc("kick_digest_worker");
+      logEvent("delivery.resend_queued",{request_id:requestId,user_id:user.id,job_id:job.data.id,source_job_id:sourceJobId,worker_triggered:!kickError&&Boolean(kick)});
+      return json({ok:true,job:job.data,worker_triggered:!kickError&&Boolean(kick)},202);
+    }
     if((route==="/send-now"||route==="/send-test")&&req.method==="POST"){
       const body=await req.json().catch(()=>({})),requestId=String(body.request_id||crypto.randomUUID());
       if(!/^[0-9a-f-]{36}$/i.test(requestId))return json({error:"Invalid request identifier."},400);
