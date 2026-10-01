@@ -55,6 +55,26 @@ Deno.serve(async(req)=>{
     if(route==="/auth/logout"&&req.method==="POST"){const{error}=await admin.from("sessions").update({revoked_at:new Date().toISOString()}).eq("id",sessionId);if(error)throw error;return json({ok:true})}
     if(route==="/me"&&req.method==="GET")return json(await dashboard(user.id,user.email));
     if(route==="/system"&&req.method==="GET"){const health=await systemHealth(user.id);logEvent("system.health_viewed",{request_id:requestId,user_id:user.id,alerts:health.alerts.length});return json(health)}
+    if(route==="/delivery-history"&&req.method==="GET"){
+      const requested=Number(new URL(req.url).searchParams.get("limit")||20);
+      const limit=Number.isFinite(requested)?Math.max(1,Math.min(100,Math.trunc(requested))):20;
+      const deliveries=await admin.from("article_deliveries")
+        .select("id,digest_id,canonical_url,title,published_at,delivery_kind,delivered_at,digests!inner(job_id,edition_name)")
+        .eq("user_id",user.id)
+        .order("delivered_at",{ascending:false})
+        .limit(limit);
+      if(deliveries.error)throw deliveries.error;
+      const items=(deliveries.data||[]).map((row:any)=>({
+        title:row.title,
+        url:row.canonical_url,
+        published_at:row.published_at||null,
+        delivered_at:row.delivered_at,
+        delivery_kind:row.delivery_kind,
+        packet_name:row.digests?.edition_name||null,
+        job_id:row.digests?.job_id||null,
+      }));
+      return json({items,limit});
+    }
     if(route==="/export"&&req.method==="GET")return json({exported_at:new Date().toISOString(),...await dashboard(user.id,user.email)});
     if(route==="/account"&&req.method==="DELETE"){const{error}=await admin.from("app_users").delete().eq("id",user.id);if(error)throw error;return json({ok:true})}
 
