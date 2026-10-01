@@ -1,0 +1,6 @@
+{
+  "observed_stage": "search",
+  "observed_output_tokens": 2200,
+  "response": {"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"content":[{"type":"output_text","text":"{\"publishers\":["}]}]},
+  "expected": "At most one output-budget retry within the original stage deadline; otherwise explicit refusal without sending."
+}

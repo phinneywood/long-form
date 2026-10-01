@@ -138,3 +138,11 @@ Deno.test('complete short originals remain eligible alongside longer essays in a
  const choices=chooseNightBundle({'0':assessment,'1':{...assessment,topic:'Science'},'2':{...assessment,topic:'Philosophy'}},[{indices:[0,1,2],minutes:35,sources:3}],35);
  assert(choices.length===3,'Length alone never turns complete original journalism into a teaser');
 });
+
+Deno.test('output-exhausted discovery retries once within its original bound, while persistent truncation fails closed',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-incomplete-native-search.json',import.meta.url)));
+ for(const persistent of [false,true]){let calls=0;const budgets:number[]=[];let failed=false;
+  try{await composeNight({request:'35 minutes',minutes:35,brief:'History',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{calls++;budgets.push(JSON.parse(i.body).max_output_tokens);return Response.json(persistent||calls===1?fixture.response:{output:[{content:[{type:'output_text',text:'{"publishers":[]}'}]}]});}});}catch(error){failed=error instanceof Error&&error.message.includes(persistent?'incomplete reading plan':'No suitable original articles');}
+  assert(failed&&calls===(persistent?2:3)&&budgets[0]===2200&&budgets[1]===4400);
+ }
+});
