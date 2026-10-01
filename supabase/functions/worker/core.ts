@@ -117,7 +117,259 @@ async function digestForGroup(job: any, group: { section: any; items: EpubArticl
   };
   let digest: any = null;
   if (row.section_id) {
-    const result = await admin.from("digests").upsert(row…3360 tokens truncated…h) {
+    const result = await admin.from("digests").upsert(row, { onConflict: "job_id,section_id" }).select("id").single();
+    if (result.error) throw result.error;
+    digest = result.data;
+  } else {
+    const existing = await admin.from("digests").select("id").eq("job_id", job.id).is("section_id", null).maybeSingle();
+    if (existing.error) throw existing.error;
+    if (existing.data) {
+      const result = await admin.from("digests").update(row).eq("id", existing.data.id).select("id").single();
+      if (result.error) throw result.error;
+      digest = result.data;
+    } else {
+      const result = await admin.from("digests").insert(row).select("id").single();
+      if (result.error) throw result.error;
+      digest = result.data;
+    }
+  }
+  // Explicit test sends verify the live pipeline without consuming articles from
+  // the reader's next real issue.
+  if (job.reason === "test" || job.result?.resend_of_job_id) return;
+  const deliveries = group.items.map((article) => ({
+    user_id: job.user_id,
+    feed_id: article.feed_id || null,
+    section_id: article.section_id || null,
+    digest_id: digest.id,
+    canonical_url: article.canonical_url,
+    article_hash: article.article_hash,
+    title: article.title,
+    published_at: article.published_at,
+    delivery_kind: job.reason === "one_time" || job.result?.publication_kind === "tonight" ? "one_time" : "recurring",
+    delivered_at: new Date().toISOString(),
+  }));
+  if (deliveries.length) {
+    const result = await admin.from("article_deliveries").upsert(deliveries, { onConflict: "digest_id,article_hash", ignoreDuplicates: true });
+    if (result.error) throw result.error;
+  }
+}
+
+async function buildOneTime(job: any, settings: any, now: Date, displayDate: string, filenameDate: string, deadline: number) {
+  const name = String(job.packet_name || "").trim();
+  const urls = Array.isArray(job.article_urls) ? job.article_urls.map(String) : [];
+  if (!name || !urls.length || urls.length > 20) throw new Error("This one-time edition request is invalid.");
+  const budget = extractionBudget(deadline);
+  const items: EpubArticle[] = new Array(urls.length);const errors: { index: number; error: unknown }[] = [];let cursor = 0;
+  async function articleWorker() {
+    while (true) {
+      const index = cursor++;if (index >= urls.length) return;
+      try { items[index] = await extractArticle({ url: urls[index], includeImages: true, budget }); }
+      catch (error) { errors.push({ index, error }); }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, urls.length) }, () => articleWorker()));
+  if (errors.length) {
+    errors.sort((a, b) => a.index - b.index);const first = errors[0];
+    throw new Error(`Article ${first.index + 1} could not be prepared: ${first.error instanceof Error ? first.error.message : String(first.error)}`);
+  }
+  const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition" }, items);
+  const qa = await validateEpub(bytes, items);
+  const media = summarizeMedia(items);
+  logEvent("epub.qa_completed", { job_id: job.id, ...qa, media_discovered: media.discovered, media_embedded: media.embedded, media_failed: media.failed, media_omitted: media.omitted });
+  return {
+    attachments: [{ filename: `${slug(name)}-${filenameDate}.epub`, content: base64(bytes), content_type: "application/epub+zip" }],
+    groups: [{ section: { id: null, name }, items }],
+    feedCount: 0, issues: [] as string[],
+    subject: `${name} — ${displayDate}`,
+    qa,
+    media,
+  };
+}
+
+async function buildRecurring(job: any, settings: any, now: Date, displayDate: string, filenameDate: string, deadline: number) {
+  const timezone = settings.timezone || "UTC";
+  let selectedGroups: { section: any; items: EpubArticle[] }[] = [];
+  let pendingItems: EpubArticle[] = [];
+  let issues: string[] = [];
+  let feedCount = 0;
+  let editorialSummary: any = null;
+  let issueIntroduction: string | null = null;
+
+  const frozen = job.result?.preparation_manifest;
+  if ([1, 2, 3].includes(frozen?.version) && Array.isArray(frozen.groups)) {
+    const restore = (item: any): EpubArticle => ({ ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: typeof asset.bytes === "string" ? Buffer.from(asset.bytes, "base64") : asset.bytes })) });
+    selectedGroups = frozen.groups.map((group: any) => ({ ...group, items: group.items.map(restore) }));
+    pendingItems = Array.isArray(frozen.pendingItems) ? frozen.pendingItems.map(restore) : [];
+    issues = Array.isArray(frozen.issues) ? frozen.issues : [];
+    feedCount = Number(frozen.feedCount || 0);
+    editorialSummary = frozen.editorial || null;
+    issueIntroduction = typeof frozen.introduction === "string" ? frozen.introduction : null;
+    logEvent("digest.manifest_reused", {
+      job_id: job.id,
+      user_id: job.user_id,
+      version: frozen.version,
+      groups: selectedGroups.length,
+      articles: selectedGroups.reduce((count, group) => count + group.items.length, 0) + pendingItems.length,
+    });
+  } else {
+    const preparationStarted = performance.now();
+    const [feedResult, pendingResult] = await Promise.all([
+      admin.from("feeds").select("*").eq("user_id", job.user_id).eq("enabled", true).is("archived_at", null).order("created_at"),
+      admin.from("pending_issue_articles").select("*").eq("user_id", job.user_id).order("created_at").limit(20),
+    ]);
+    if (feedResult.error) throw feedResult.error;
+    if (pendingResult.error) throw pendingResult.error;
+
+    const history: DeliveryRecord[] = [];
+    if (job.reason !== "test") {
+      // Read every page, not just the API's default row limit. Normalize historical
+      // URLs in the supply planner so tracking variants cannot evade dedupe.
+      for (let offset = 0; ; offset += 1000) {
+        if (Date.now() >= deadline) throw new Error("Delivery history could not be checked within the preparation deadline.");
+        const previous = await admin.from("article_deliveries")
+          .select("article_hash,canonical_url,delivery_kind")
+          .eq("user_id", job.user_id).order("delivered_at", { ascending: false })
+          .range(offset, offset + 999);
+        if (previous.error) throw previous.error;
+        history.push(...(previous.data || []));
+        if ((previous.data || []).length < 1000) break;
+        if (history.length >= 50_000) throw new Error("Delivery history exceeds the safe preparation limit; review history indexing.");
+      }
+    }
+    const prepared = await prepareIssueSupply({
+      feeds: feedResult.data || [], pending: pendingResult.data || [], history,
+      now, lookbackHours: job.lookback_hours, deadline,
+      editorialBrief: String(settings.editorial_brief || ""),
+      additionalInstructions: String(settings.editorial_instructions || ""),
+    }, {
+      updateFeed: async (feed, patch) => {
+        const result = await admin.from("feeds").update(patch).eq("id", feed.id).eq("user_id", job.user_id);
+        if (result.error) throw result.error;
+      },
+      log: (event, fields) => logEvent(event, { job_id: job.id, user_id: job.user_id, ...fields }),
+    });
+    selectedGroups = prepared.groups;
+    pendingItems = prepared.pendingItems;
+    issues = prepared.issues;
+    feedCount = prepared.feedCount;
+    editorialSummary = prepared.editorial;
+    issueIntroduction = prepared.introduction;
+
+    const manifest = {
+      version: 2,
+      groups: selectedGroups.map((group) => ({
+        section: { id: null, name: group.section.name },
+        items: group.items.map((item) => ({ ...item, assets: [] })),
+      })),
+      pendingItems: pendingItems.map((item) => ({ ...item, assets: [] })),
+      introduction: issueIntroduction,
+      issues,
+      feedCount,
+      editorial: editorialSummary,
+    };
+    const manifestWrite = await admin.from("digest_jobs").update({
+      result: { ...(job.result || {}), preparation_manifest: manifest },
+    }).eq("id", job.id);
+    if (manifestWrite.error) throw manifestWrite.error;
+    logEvent("digest.manifest_frozen", {
+      job_id: job.id,
+      user_id: job.user_id,
+      version: 2,
+      articles: selectedGroups.reduce((count, group) => count + group.items.length, 0) + pendingItems.length,
+      duration_ms: Math.round(performance.now() - preparationStarted),
+    });
+    throw new FrozenManifestReady();
+  }
+
+  if (frozen?.version !== 3) {
+    const budget = extractionBudget(deadline);
+    budget.allowImageTranscoding = false;
+    const selected = [...selectedGroups.flatMap((group) => group.items), ...pendingItems];
+    const hydrated = new Map<string, EpubArticle>();
+    let imageCursor = 0;
+    const hydrationStarted = performance.now();
+    logEvent("digest.stage_started", { job_id: job.id, stage: "image_hydration", articles: selected.length });
+    async function imageHydrator() {
+      while (true) {
+        const index = imageCursor++;
+        if (index >= selected.length) return;
+        const item = selected[index];
+        try {
+          if (job.reason === "test") hydrated.set(item.article_hash, omitArticleImages(item));
+          else hydrated.set(item.article_hash, await hydrateArticleImages(item, budget));
+        } catch (error) {
+          hydrated.set(item.article_hash, {
+            ...item,
+            warnings: [...new Set([...(item.warnings || []), "Images could not be prepared; the article text was preserved."])],
+          });
+          logEvent("article.image_hydration_failed", {
+            job_id: job.id, url: item.canonical_url,
+            error: error instanceof Error ? error.message : String(error),
+          }, "warn");
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(2, selected.length) }, () => imageHydrator()));
+    logEvent("digest.stage_completed", {
+      job_id: job.id,
+      stage: "image_hydration",
+      duration_ms: Math.round(performance.now() - hydrationStarted),
+      articles: selected.length,
+    });
+
+    // End the image-processing invocation before CPU-heavy cover rendering and
+    // ZIP packaging. Persist binary assets explicitly; JSON cannot round-trip
+    // Uint8Array. Retries reuse these bytes instead of fetching images again.
+    const persist = (item: EpubArticle) => {
+      const prepared = hydrated.get(item.article_hash) || item;
+      return { ...prepared, assets: (prepared.assets || []).map(asset => ({ ...asset, bytes: base64(asset.bytes) })) };
+    };
+    const checkpoint = { ...frozen, version: 3,
+      groups: selectedGroups.map(group => ({ ...group, items: group.items.map(persist) })),
+      pendingItems: pendingItems.map(persist),
+    };
+    const saved = await admin.rpc("checkpoint_digest_preparation",{p_job_id:job.id,p_user_id:job.user_id,p_manifest:checkpoint});
+    if (saved.error) throw saved.error;
+    throw new FrozenManifestReady("prepared-media");
+  }
+
+  const groups: { section: any; items: EpubArticle[] }[] = [];
+  const issueItems: EpubArticle[] = [];
+  for (const group of selectedGroups) {
+    const items = group.items;
+    groups.push({ section: group.section, items });
+    issueItems.push(...items);
+  }
+  const hydratedPending = pendingItems;
+  issueItems.push(...hydratedPending);
+  if (hydratedPending.length) groups.push({ section: { id: null, name: "Saved articles" }, items: hydratedPending });
+
+  // Immutable reading copy, independent of seven-day outbox retention.
+  if (issueItems.length && job.reason !== "test" && !job.result?.publication_id) {
+    const existing=await admin.from("publication_editions").select("id").eq("job_id",job.id).eq("user_id",job.user_id).maybeSingle();if(existing.error)throw existing.error;
+    if(!existing.data){
+    const readableGroups = groups.map(group => ({ ...group, items: group.items.map(item => {
+      let body = item.body;
+      for (const asset of item.assets || []) body = body.split(asset.href).join(`data:${asset.mediaType};base64,${base64(asset.bytes)}`);
+      return { ...item, body, assets: [] };
+    }) }));
+    const items = publicationItems(readableGroups), target = Number(job.result?.target_minutes) || 30;
+    const row = {
+      user_id: job.user_id, job_id: job.id, kind: job.result?.publication_kind || "daily",
+      title: job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Long Form",
+      target_minutes: target, created_at: job.created_at,
+      manifest: { version: 1, items, featured: job.result?.publication_kind === "tonight" ? items.map((_,i)=>i) : featuredPath(items,target),
+        introduction: issueIntroduction, issues, editorial: editorialSummary },
+    };
+    const summary={...row.manifest,items:row.manifest.items.map(({body:_body,assets:_assets,...item})=>item)};
+    const saved=await admin.rpc("archive_publication_edition",{p_job_id:job.id,p_user_id:job.user_id,p_kind:row.kind,p_title:row.title,p_target_minutes:row.target_minutes,p_manifest:row.manifest,p_summary:summary});
+    if (saved.error) throw saved.error;
+    }
+  }
+
+  const testIdentity = testArtifactIdentity(job, now, timezone, displayDate, filenameDate);
+  const attachments: any[] = [];
+  if (issueItems.length) {
     const packagingStarted = performance.now();
     logEvent("digest.stage_started", { job_id: job.id, stage: "epub_packaging", articles: issueItems.length });
     const bytes = await makeEpub({
