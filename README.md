@@ -87,6 +87,8 @@ The MCP exposes a narrow Long Form tool surface rather than generic database or 
 - `update_editorial_brief`
 - `get_editor_settings`
 - `update_editor_settings`
+- `send_packet` — queue a standalone EPUB from explicit article URLs, with optional idempotency for automation
+- `get_packet_status` — check the delivery state of a standalone packet
 - `send_now`
 
 OAuth scopes:
