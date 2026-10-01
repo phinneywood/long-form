@@ -1,5 +1,5 @@
 /* Publication UI uses only authenticated application capabilities. */
-let editions=[],publicationEpoch=0,currentReading=null,readerFrame=null,readingSaveTimer=null,editorBusy=false;
+let editions=[],publicationEpoch=0,currentReading=null,readerFrame=null,readingSaveTimer=null,editorBusy=false,readerParagraphs=[];
 let editionRequest=null,nightRequest=null;
 const localReadingKey=k=>`longFormReading:${state?.user?.id}:${k}`;
 const currentRoute=()=>location.hash.slice(1)||'today';
@@ -75,6 +75,7 @@ function editionPage(e){
 }
 async function readPage(context,epoch){
   const r=await api('/reader/article',{method:'POST',body:context});if(epoch!==publicationEpoch)return;
+  readerParagraphs=r.paragraphs||[];
   currentReading={...context,article_key:r.article_key,paragraph:r.reading.paragraph||0,progress:r.reading.progress||0,title:r.article.title,saved:r.reading.saved};
   const cached=JSON.parse(localStorage.getItem(localReadingKey(r.article_key))||'null');if(cached&&cached.updated_at>Date.parse(r.reading.updated_at||0)){currentReading.progress=cached.progress;currentReading.paragraph=cached.paragraph;}
   const e=context.edition_id?editionById(context.edition_id):null;
@@ -97,7 +98,9 @@ function persistReading(){
   if(!readerFrame?.contentDocument||!currentReading?.article_key)return;
   const doc=readerFrame.contentDocument,max=Math.max(1,doc.documentElement.scrollHeight-readerFrame.clientHeight),y=doc.defaultView.scrollY;
   currentReading.progress=Math.min(1,Math.max(0,y/max));
-  const ps=[...doc.querySelectorAll('p,h1,h2,h3,li,blockquote,pre')];const visible=ps.findIndex(p=>p.getBoundingClientRect().bottom>10);currentReading.paragraph=Math.max(0,visible);
+  const selector='p,h1,h2,h3,h4,h5,h6,li,blockquote,pre',ps=[...doc.querySelectorAll(selector)].filter(p=>!p.querySelector(selector));
+  const visible=ps.find(p=>p.getBoundingClientRect().bottom>10&&(p.textContent||'').trim()),text=(visible?.textContent||'').replace(/\s+/g,' ').trim();
+  const number=text?readerParagraphs.findIndex(p=>p.includes(text)): -1;if(number>=0)currentReading.paragraph=number;
   localStorage.setItem(localReadingKey(currentReading.article_key),JSON.stringify({progress:currentReading.progress,paragraph:currentReading.paragraph,updated_at:Date.now()}));
   rememberReading();
   void api('/reader/state',{method:'PATCH',body:{...currentReading,progress:currentReading.progress,paragraph:currentReading.paragraph}}).catch(()=>{});
@@ -130,7 +133,7 @@ async function editorPage(epoch){
   const q=sessionStorage.getItem('longFormEditorQuestion');if(q){document.querySelector('#editor-question').value=q;sessionStorage.removeItem('longFormEditorQuestion');}
   document.querySelector('#editor-conversation').onsubmit=async ev=>{
     ev.preventDefault();if(editorBusy)return;editorBusy=true;const field=document.querySelector('#editor-question'),question=field.value;const button=document.querySelector('#ask-editor');button.disabled=true;button.textContent='Considering your reading…';
-    try{const r=await api('/editor/message',{method:'POST',body:{question,request_key:crypto.randomUUID(),...currentReading}});if(epoch!==publicationEpoch)return;document.querySelector('#editor-messages').insertAdjacentHTML('beforeend',messageHtml(r.message));field.value='';wireEditorMessages([...h.messages,r.message]);document.querySelector('#editor-messages').lastElementChild.scrollIntoView({block:'start',behavior:'smooth'});if(r.message.response?.compose_request){const c=r.message.response.compose_request;await startNight(c.request,c.minutes);}else if(r.message.response?.send_request){await reviewEditorSend(r.message);}}
+    try{const r=await api('/editor/message',{method:'POST',body:{question,request_key:crypto.randomUUID(),...currentReading}});if(epoch!==publicationEpoch)return;document.querySelector('#editor-messages').insertAdjacentHTML('beforeend',messageHtml(r.message));field.value='';h.messages.push(r.message);wireEditorMessages(h.messages);document.querySelector('#editor-messages').lastElementChild.scrollIntoView({block:'start',behavior:'smooth'});if(r.message.response?.compose_request){const c=r.message.response.compose_request;await startNight(c.request,c.minutes);}else if(r.message.response?.send_request){await reviewEditorSend(r.message);}}
     catch(err){toast(err.message);}finally{editorBusy=false;if(button.isConnected){button.disabled=false;button.textContent='Ask your editor';}}
   };
 }

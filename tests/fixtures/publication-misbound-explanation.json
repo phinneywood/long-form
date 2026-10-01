@@ -1,0 +1,11 @@
+{
+  "source": "2026-10-01 live fresh-account batch, run 1",
+  "actual_order": [
+    "One Giant Clam Contains a Month\u2011by\u2011Month Diary of the Great Barrier Reef\u2019s Climate 200 Years Ago",
+    "Gravity Seems Holographic. What Does That Mean for Reality?",
+    "Black holes ring like bells. What happens next is stranger | Aeon Essays"
+  ],
+  "wrong_lead_reason": "As the reflective finish, it moves from a scientific puzzle to a broader meditation on history, forgetting and loss, leaving the reader with an evocative thought rather than another technical claim. It follows \u201cGravity Seems Holographic. What Does That Mean for Reality?\u201d by carrying the focus on gravity and black holes into a more personal, contemplative register.",
+  "wrong_finish_reason": "As the welcoming lead, this makes climate science vivid and approachable through the surprising image of a clam keeping a diary. Its concrete subject opens the sequence before the more abstract physics in \u201cGravity Seems Holographic. What Does That Mean for Reality?\u201d",
+  "expected": "Generate each placement explanation from only its actual original body, with frozen neighbor titles; attach it through application identity rather than model numeric-key correspondence."
+}

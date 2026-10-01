@@ -18,8 +18,8 @@ Deno.test('model outage and fabricated citations are explicit non-blocking edito
 });
 Deno.test('editor receives actual paragraphs and never acquires arbitrary tools',async()=>{
  const ps=paragraphs('<p>First original argument.</p><p>Second original argument.</p>');assert(ps.length===2&&ps[1]==='Second original argument.');
- let sent:any;await editorReply({reading:{visible_paragraphs:ps},evidence:[{id:'reading'}]},{apiKey:'test',fetchImpl:async(_u,i)=>{sent=JSON.parse(String(i?.body));return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify({answer:'The argument is grounded.',action:'answer',guidance:null,minutes:null,citations:['reading']})}]}]})}});
- assert(!sent.tools);assert(sent.input[1].content.includes('Second original argument.'));assert(sent.input[0].content.includes('confirmation action'));
+ let sent:any;const reply=await editorReply({reading:{visible_paragraphs:ps},evidence:[{id:'reading'}]},{apiKey:'test',fetchImpl:async(_u,i)=>{sent=JSON.parse(String(i?.body));return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify({answer:'The argument is grounded. [reading]',action:'answer',guidance:null,minutes:null,citations:['reading']})}]}]})}});
+ assert(!reply.answer.includes('[reading]'),'Evidence links render separately from plain editorial prose');assert(!sent.tools);assert(sent.input[1].content.includes('Second original argument.'));assert(sent.input[0].content.includes('confirmation action'));
  assert(sent.text.format.schema.properties.citations.items.enum.join(',')==='reading','Native citations are constrained to actual retrieved evidence');
 });
 Deno.test('reading conversation cannot replay another original or historical full-text citations',async()=>{
@@ -73,7 +73,7 @@ Deno.test('selected-only sequencing rejects real contradictory selection notes a
 });
 
 Deno.test('composition sequences the exact extracted selection, never the whole candidate pool',async()=>{
- const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-neighbor-ordering.json',import.meta.url)));assert(fixture.actual_order[1].includes('Library'));
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-neighbor-ordering.json',import.meta.url)));assert(fixture.actual_order[1].includes('Library'));const misbound=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-misbound-explanation.json',import.meta.url)));assert(misbound.wrong_finish_reason.includes('clam'));
  const originalFetch=globalThis.fetch;let chosen:number[]=[],sequenced:any[]=[],stages=0;
  globalThis.fetch=(async(input:RequestInfo|URL)=>{
   const id=Number(new URL(String(input)).pathname.split('/').at(-1));
@@ -83,12 +83,13 @@ Deno.test('composition sequences the exact extracted selection, never the whole 
   const result=await composeNight({request:'35 minutes, interesting and surprising, not work',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{
    const sent=JSON.parse(i.body),input=JSON.parse(sent.input[1].content);let output:any;
    if(stages++===0)output={publishers:Array.from({length:5},(_,publisher)=>({domain:'8.8.8.8',urls:[`https://8.8.8.8/${publisher}`,`https://8.8.8.8/${publisher+5}`]}))};
-   else if(Object.values(sent.text.format.schema.properties.assessments.properties)[0] instanceof Object && (Object.values(sent.text.format.schema.properties.assessments.properties)[0] as any).properties.fit_score){output={assessments:Object.fromEntries(input.articles.map((a:any)=>[String(a.index),{topic:'History',work_related:false,original_article:true,fit_score:5}]))};}
-   else if(sent.text.format.schema.properties.assessments.properties[input.articles[0].index].properties.rank){sequenced=input.articles;chosen=sequenced.map(a=>a.index);assert(sequenced.length>=3&&sequenced.length<=5);output={assessments:Object.fromEntries(sequenced.map((a,i)=>[String(a.index),{rank:sequenced.length-i}]))};}
-   else{assert(input.articles.map((a:any)=>a.index).join(',')===[...chosen].reverse().join(','));assert(input.articles[0].previous===null&&input.articles.at(-1).next===null);output={introduction:'An introduction to the exact selected originals.',assessments:Object.fromEntries(input.articles.map((a:any,i:number)=>[String(a.index),{topic:`Topic ${i}`,reason:`${a.title} is followed by ${a.next||'the end'}.`,work_related:false}]))};}
+   else if(sent.text.format.schema.properties.assessments && Object.values(sent.text.format.schema.properties.assessments.properties)[0] instanceof Object && (Object.values(sent.text.format.schema.properties.assessments.properties)[0] as any).properties.fit_score){output={assessments:Object.fromEntries(input.articles.map((a:any)=>[String(a.index),{topic:a.index%2?'Culture':'Science',work_related:false,original_article:true,fit_score:5}]))};}
+   else if(sent.text.format.schema.properties.assessments){sequenced=input.articles;chosen=sequenced.map(a=>a.index);assert(sequenced.length>=3&&sequenced.length<=5);output={assessments:Object.fromEntries(sequenced.map((a,i)=>[String(a.index),{rank:sequenced.length-i}]))};}
+   else if(sent.text.format.schema.properties.reason){assert(input.article?.text&&!input.articles,'Placement is grounded in one original, never a keyed multi-original body');output={reason:`${input.article.title} is a ${input.role}, followed by ${input.next||'the end'}.`};}
+   else{assert(input.articles.map((a:any)=>a.title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));output={introduction:'An introduction to the exact selected originals.'};}
    return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify(output)}]}]});
   }});
-  assert(stages===4);assert(result.groups.map((g:any)=>g.items[0].title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));
+  assert(stages===4+chosen.length);assert(result.groups.map((g:any)=>g.items[0].title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));
  }finally{globalThis.fetch=originalFetch;}
 });
 
@@ -122,4 +123,10 @@ Deno.test('editorial fit is considered before pruning feasible budgets or long r
  const assessments=Object.fromEntries(pool.map((a,i)=>[String(i),{work_related:i<12,original_article:true,fit_score:4,topic:a.source}]));
  const selected=chooseNightBundle(assessments,nightBundles(pool,35),35);
  assert(selected.join(',')==='12,13,14','Suitable originals beyond the first fifty structural bundles remain eligible');
+});
+
+Deno.test('nighttime diversity uses broad assessed subjects rather than unique article labels',()=>{
+ const assessments=Object.fromEntries([0,1,2].map(i=>[String(i),{work_related:false,original_article:true,fit_score:5,topic:'Science'}]));
+ let rejected=false;try{chooseNightBundle(assessments,[{indices:[0,1,2],minutes:35,sources:3}],35)}catch{rejected=true}assert(rejected);
+ assessments['1'].topic='History';assert(chooseNightBundle(assessments,[{indices:[0,1,2],minutes:35,sources:3}],35).length===3);
 });

@@ -26,9 +26,11 @@ Early versions failed through combinations of extraction infeasibility, guessed 
 
 The first publisher-catalog batch produced **4/5 structural passes** (36, 35, 34 and 35 minutes; 3–5 originals; 3+ sources; no repeats). Manual review downgraded the 34-minute run because placement explanations contradicted its actual neighbors. The refusal retained content and sent nothing. Another frozen-sequence batch produced **1/5 completed editions**: a large media-checkpoint write stalled preparation and later requests correctly encountered the active-edition guard. A mistakenly concurrent evaluator produced 0/5, mostly active-job rejections; it is a test-harness mistake, not an independent editorial benchmark. These failures led to preserving all feasible combinations until suitability assessment, freezing order before explaining it, and narrowly scoped 30-second backend writes for checkpoints/archive/outbox rather than changing database role limits.
 
-Current release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
+The first fresh-account batch on the frozen-sequence version also produced **4/5 structural passes**, but manual review downgraded two because multi-original keyed placement prose was attached to the wrong originals. Its semantic result was **2/5**. The history-heavy stress account produced **1/5** on that version, all refusals being explicit and sending nothing. Neither result clears the editorial release gate.
 
-Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
+Current single-original-explanation release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
+
+Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale and misbound original explanations. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
 
 ## Current competitor evidence (October 1, 2026)
 
