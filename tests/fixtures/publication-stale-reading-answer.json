@@ -1,0 +1,18 @@
+{
+  "source": "isolated production evaluation, 2026-10-01",
+  "question": "I don\u2019t understand the author\u2019s argument in these two paragraphs.",
+  "current_title": "The Mysterious Grave of Charlotte Temple",
+  "visible_paragraphs": [
+    {
+      "number": 3,
+      "text": "The narrator imagines a nineteenth-century visitor to Trinity Churchyard and asks why people gather around one particular grave."
+    },
+    {
+      "number": 4,
+      "text": "The guest describes a marked grave where visitors leave flowers and cards, sometimes crying."
+    }
+  ],
+  "failed_answer": "You mean the first two visible numbered paragraphs, 3 and 4. They set up the article\u2019s central puzzle rather than fully state its argument. Paragraph 3 says the squirrels were well-fed, yet an enormous number were migrating, so the obvious explanation\u2014hunger\u2014didn\u2019t fit. Paragraph 4 introduces the Smithsonian Center for Short-Lived Phenomena, which gathered reports quickly so scientists could investigate unusual events while they were happening. The author\u2019s larger point is that these brief events can reveal how natural systems work, but researchers often miss their beginnings if they arrive too late. The article later explains the squirrels\u2019 movement: a large nut crop in 1967 helped the population grow, while a poor crop of winter food in 1968 likely sent them searching elsewhere (paragraph 26).",
+  "expected": "Explain the fictional-character grave and visiting mourners from current paragraphs 3\u20134, not the previous Smithsonian squirrel migration. Previous conversation is not article evidence.",
+  "passage_text": "Paraphrased fixture; production verification uses the actual stored original."
+}

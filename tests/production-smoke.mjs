@@ -10,7 +10,7 @@ const out='test-results/production';
 await fs.mkdir(out,{recursive:true});
 const hash=s=>createHash('sha256').update(s).digest('hex');
 const expected={};
-for(const [url,file] of [['/','index.html'],['/styles.css','styles.css'],['/opml.js','opml.js'],['/privacy','privacy.html'],['/terms','terms.html']])expected[url]=hash(await fs.readFile(file));
+for(const [url,file] of [['/','index.html'],['/styles.css','styles.css'],['/publication.js','publication.js'],['/publication.css','publication.css'],['/opml.js','opml.js'],['/privacy','privacy.html'],['/terms','terms.html']])expected[url]=hash(await fs.readFile(file));
 let actual={},matched=false;
 for(let attempt=0;attempt<30;attempt++){
  try{

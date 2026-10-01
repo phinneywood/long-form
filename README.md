@@ -1,8 +1,8 @@
 # Long Form
 
-**Your sources. An AI editor. A daily Kindle edition.**
+**Your personal publication, run by an AI editor.**
 
-Long Form turns articles from publications you choose into a personal daily publication, organized by AI and delivered to your Kindle.
+Long Form composes finite editions from trusted subscriptions and bounded discovery. Read the original authors, discuss with the editor who arranged them, save reading, and send an exact edition to Kindle when you choose.
 
 [Open Long Form](https://reader.antonioskilton.com) · [About the builder](https://antonioskilton.com)
 
@@ -17,7 +17,7 @@ Long Form is a live beta. The implementation and its current limits are document
 
 ## Reading experience
 
-Long Form puts readers back in charge of their attention by turning the long-form publications they choose into one calm daily Kindle issue (an EPUB file). Readers manage a flat source list; at issue time an AI editor organizes every eligible subscribed-feed article into dynamic sections, using a fixed **Other** section when no coherent grouping fits. The editor never drops an otherwise eligible RSS article. Readers can also add 1–20 article URLs to the next issue under a reading-list name.
+The primary experience is Today → finite edition → original reader → contextual editor. A budgeted featured path has an explicit end; Further reading retains every other eligible subscribed original. No unread inbox needs clearing. Explore keeps source controls and an unfiltered chronological feed. Library keeps frozen originals, saved material and edition/delivery history. Tonight’s Reading is a separate 3–5-original edition with a requested time budget, source/topic diversity and recent-repeat suppression. Kindle remains a first-class output, using the exact reviewed EPUB. Readers manage a flat source list; at issue time an AI editor organizes every eligible subscribed-feed article into dynamic sections, using a fixed **Other** section when no coherent grouping fits. The editor never drops an otherwise eligible RSS article. Readers can also add 1–20 article URLs to the next issue under a reading-list name.
 
 Article pages are reduced to their readable body while preserving headings, lists, links, tables, code, quotations, captions, and supported images. The opening contents page shows Section → Topic → Article title, with each article title linking directly to the article; EPUB 3 and legacy Kindle navigation expose the same hierarchy. Every EPUB also includes reflowable styling, publisher metadata, and a dated cover designed to remain recognizable as a Kindle home-screen thumbnail.
 
@@ -41,6 +41,12 @@ Discovery failure never blocks the core RSS issue. Already delivered RSS article
 Dashboard warnings identify each affected recurring source directly. Paused source failures remain visible as historical errors on the source row. Article browsing and System health link errors to the same source controls.
 
 `POST /feeds/:id/check` rechecks one non-archived source owned by the signed-in account. It reuses the normal feed preview and persisted health tracking, returns the updated dashboard, does not resume paused feeds, and never queues a Kindle delivery. Publisher failures remain actionable in the dialog; recovered sources lose their warning.
+
+## Editorial continuity
+
+Publication manifests preserve original text, provenance, ordering and recorded placement reasons. Discussion retrieves actual article passages, source/library evidence and up to 500 delivery records. Missing historical text is never reconstructed; bounded coverage is explicit. Reading position and saved flags persist independently. Nighttime steering is temporary conversation guidance; a proposal changes future preferences only through a separate confirmation, with concurrent-change protection. Fixed product rules remain outside editable guidance.
+
+See [the acceptance contract](docs/personal-publication.md) and opt-in `tests/live-publication-eval.mjs`. Automated browser fixtures do not substitute for repeated live editorial evaluation.
 
 ## Production architecture
 
@@ -90,6 +96,9 @@ The MCP exposes a narrow Long Form tool surface rather than generic database or 
 - `send_packet` — queue a standalone EPUB from explicit article URLs, with optional idempotency for automation
 - `get_packet_status` — check the delivery state of a standalone packet
 - `send_now`
+- `list_publications`, `read_publication_article` — finite editions and original text
+- `discuss_reading` — grounded editorial discussion and temporary steering
+- `compose_reading_edition`, `get_publication_status`, `send_publication` — compose without sending, then explicitly send frozen bytes and observe status
 
 OAuth scopes:
 - `reader:read` — profile, source list, feed discovery, previews, editor settings

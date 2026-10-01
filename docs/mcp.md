@@ -10,13 +10,27 @@ Long Form keeps the model-facing surface intentionally narrow. The MCP does not 
 
 | Tool | Scope | Effect |
 | --- | --- | --- |
-| `get_profile` | `reader:read` | Identify the connected Long Form account |
-| `list_editions` | `reader:read` | List Kindle editions and their sources |
-| `find_feeds` | `reader:read` | Discover/validate RSS or Atom feeds |
-| `preview_edition` | `reader:read` | Preview current articles without sending |
-| `create_edition` | `reader:read reader:write` | Create a separate Kindle EPUB edition |
-| `add_source` | `reader:read reader:write` | Add a website/feed to an edition |
-| `send_now` | `reader:read reader:write` | Queue immediate delivery |
+| `get_profile` | `reader:read` | Identify the connected account |
+| `list_sources`, `find_feeds`, `preview_sources` | `reader:read` | Inspect recurring sources and chronological candidates |
+| `add_source` | `reader:read reader:write` | Add a recurring website/feed |
+| `get_editorial_brief`, `get_editor_settings` | `reader:read` | Read explicit editorial preferences |
+| `update_editorial_brief`, `update_editor_settings` | `reader:read reader:write` | Apply explicitly requested preferences within fixed product rules |
+| `get_delivery_history`, `get_packet_status` | `reader:read` | Retrieve actual delivery records and packet status |
+| `send_packet`, `send_now` | `reader:read reader:write` | Queue explicitly requested standalone or recurring delivery |
+| `list_publications` | `reader:read` | List finite editions, featured paths and preparation status |
+| `read_publication_article` | `reader:read` | Retrieve the actual original, numbered paragraphs and reading state |
+| `discuss_reading` | `reader:read reader:write` | Persist discussion grounded in edition, article, source/library and delivery context; steering remains temporary |
+| `compose_reading_edition` | `reader:read reader:write` | Prepare Tonight’s Reading without sending |
+| `send_publication` | `reader:read reader:write` | Send the reviewed edition’s exact frozen EPUB |
+| `get_publication_status` | `reader:read` | Observe preparation/delivery status and omissions |
+
+Publication capabilities delegate to the same authenticated application routes used by Long Form. The server derives tenant identity from OAuth and creates a short-lived internal session; callers cannot supply another user ID. No arbitrary database or HTTP tool is exposed.
+
+Composition, discussion and sending use stable `request_key` values for retries. Composition never sends automatically. Clients must inspect the prepared edition, wait for an explicit user send instruction, and then observe the returned delivery job. `sent` and `partial` indicate email-provider acceptance, not confirmed Kindle arrival. A `partial` result may describe preparation/media notes; clients must read those notes before claiming an article was omitted.
+
+Daily editions retain every deterministically eligible subscribed original. The featured path is a finite view; sending a daily edition includes Further reading. Tonight’s Reading sends the selected originals in their composed order. Neither path replaces original authors with generated summaries.
+
+Durable nighttime preference proposals require the separate confirmation in Long Form. `discuss_reading` does not silently apply them. Existing explicit settings tools remain available for user-authorized settings changes; fixed eligibility and delivery rules cannot be overridden.
 
 ## OAuth
 

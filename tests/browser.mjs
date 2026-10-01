@@ -1,153 +1,39 @@
-/** Real-browser regression evidence. Every app API request is intercepted.
- * Never uses a production account or sends real email.
- * npm install --no-save --package-lock=false playwright@1.56.1 @axe-core/playwright@4.10.2
- * npx playwright install chromium webkit
- * BROWSER=chromium node tests/browser.mjs
- */
-import { chromium, webkit } from 'playwright';
+/** Real-browser publication regression. All external app calls are intercepted;
+ * fixtures never send email. Production behavior is evaluated separately. */
+import {chromium,webkit} from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import fs from 'node:fs/promises';
-import http from 'node:http';
-import path from 'node:path';
-import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
-const reader={user:{id:'visual-reader',email:'reader@example.com'},settings:{onboarding_complete:true,kindle_email:'reader_sample@kindle.com',paused:false,delivery_time:'06:00',timezone:'America/Los_Angeles',next_run_at:'2026-09-27T13:00:00Z',editorial_brief:'Ideas, science, and the art of paying attention. Writing that rewards a slower read.',editorial_instructions:'Favor original thinking and deeply reported essays. Give unfamiliar ideas room to breathe.'},sources:[
- {id:'f1',name:'Aeon',url:'https://aeon.co/feed.rss',enabled:true},
- {id:'f2',name:'Quanta Magazine',url:'https://www.quantamagazine.org/feed/',enabled:true},
- {id:'f3',name:'The Marginalian',url:'https://www.themarginalian.org/feed/',enabled:true},
- {id:'f4',name:'Works in Progress',url:'https://worksinprogress.co/feed/',enabled:true},
- {id:'f5',name:'A publication with a very long name & a paused subscription',url:'https://example.com/a-long-address/with-a-very-long-feed-name.xml',enabled:false}],sections:[],jobs:[
- {id:'job-latest',status:'sent',reason:'scheduled',created_at:'2026-09-26T13:00:00Z',finished_at:'2026-09-26T13:01:00Z',result:{articles:12}},
- {id:'job-partial',status:'partial',reason:'one_time',packet_name:'The weekend reader',created_at:'2026-09-25T13:00:00Z',finished_at:'2026-09-25T13:02:00Z',article_urls:['https://example.com/attention'],result:{articles:3,issues:['One publisher image could not be included.']}},
- {id:'job-empty',status:'empty',reason:'scheduled',created_at:'2026-09-24T13:00:00Z',result:{articles:0}}],digests:[]};
-const articles=[
- {title:'The quiet work of paying attention',url:'https://example.com/attention',source:'Aeon',published_at:'2026-09-25T12:00:00Z'},
- {title:'What a forest knows about time',url:'https://example.com/forest',source:'Quanta Magazine',published_at:'2026-09-24T12:00:00Z'},
- {title:'A small argument for the unfinished',url:'https://example.com/unfinished',source:'The Marginalian',published_at:'2026-09-23T12:00:00Z'}];
-const reviewed=articles.map(a=>({...a,status:'ready',excerpt:'There is another way to look at the familiar. This essay follows a patient line of inquiry through everyday life, and asks what becomes visible when we stop rushing to the answer.',warnings:[]}));
-const health={window_hours:24,delivery:{success_rate:100,articles_delivered:12,median_duration_ms:48200},feeds:{healthy:4,total:5},alerts:[{severity:'warning',message:'One source needs attention.'}],recent_jobs:reader.jobs,source_issues:[{id:'f2',name:'Quanta Magazine',consecutive_failures:2,last_fetch_at:'2026-09-26T13:00:00Z',last_error:'HTTP 503 — the publisher is temporarily unavailable.'}]};
-const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const engine=process.env.BROWSER||'chromium';
-const out=process.env.REVIEW_DIR||path.join(root,'test-results',engine);
-await fs.mkdir(out,{recursive:true});
-const server=http.createServer(async(req,res)=>{
- const pathname=new URL(req.url,'http://localhost').pathname;
- const files={'/':'index.html','/styles.css':'styles.css','/opml.js':'opml.js','/starter-editions.js':'starter-editions.js','/privacy':'privacy.html','/terms':'terms.html'};
- const file=files[pathname];
- if(!file){res.writeHead(404);res.end();return;}
- try{const text=await fs.readFile(path.join(root,file));res.setHeader('Content-Type',file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html');res.end(text);}catch{res.writeHead(404);res.end();}
-});
-await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const base=`http://127.0.0.1:${server.address().port}`;
-const browser=await (engine==='webkit'?webkit:chromium).launch();
-const results=[],failures=[],errors=[];
-let page;
-const widths=process.env.WIDTHS?process.env.WIDTHS.split(',').map(Number):[320,390,768,1440];
-async function capture(name,width){
- // Fixed sheets must be captured in the viewport, not stretched over a scrolled page.
- const card=page.locator('.modal-card');
- if(await card.count())await card.evaluate(e=>e.scrollTop=0);
- await page.mouse.move(1,1);
- await page.screenshot({path:path.join(out,`${width}-${name}.png`),fullPage:!(await page.locator('#modal').isVisible())});
- const overflow=await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>{
-  if(e.closest('[hidden]')||e.closest('#app[inert]')||getComputedStyle(e).display==='none'||!e.getClientRects().length||e.classList.contains('skip-link'))return false;
-  const r=e.getBoundingClientRect();return r.right>innerWidth+1||r.left<-1;
- }).map(e=>({tag:e.tagName,class:e.className,text:e.textContent.slice(0,65),width:e.getBoundingClientRect().width})));
- // The article frame deliberately blocks scripts. Axe injection into that
- // sandbox stalls WebKit; verify its readable text and accessible name below.
- const violations=(await new AxeBuilder({page}).exclude('.first-issue-reader').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations.map(v=>({id:v.id,impact:v.impact,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}));
- results.push({name,width,overflow,violations});
- if(overflow.length||violations.length)failures.push({name,width,overflow,violations});
- if(await card.count()){
-  const scrolls=await card.evaluate(e=>e.scrollHeight>e.clientHeight+1);
-  if(scrolls){await card.evaluate(e=>e.scrollTop=e.scrollHeight);await page.screenshot({path:path.join(out,`${width}-${name}-bottom.png`),fullPage:false});await card.evaluate(e=>e.scrollTop=0);}
- }
-}
-async function home(){await page.evaluate(data=>{closeModal(true);state=structuredClone(data);sourcesExpanded=false;dashboard();window.scrollTo(0,0);},reader);}
-try{
- for(const width of widths){
-  const context=await browser.newContext({viewport:{width,height:900},deviceScaleFactor:1,isMobile:width<700,hasTouch:width<1100,reducedMotion:'reduce',timezoneId:'America/Los_Angeles'});
-  page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
-  await page.route('**/*',async route=>{
-   const url=new URL(route.request().url());
-   if(url.origin===base)return route.continue();
-   if(!url.pathname.includes('/functions/v1/app-api'))return route.abort();
-   const endpoint=url.pathname.split('/app-api')[1],method=route.request().method();
-   let payload=structuredClone(reader);
-   if(endpoint==='/auth/request-code')payload={};
-   else if(endpoint==='/auth/verify-code')payload={...payload,token:'synthetic-session'};
-   else if(endpoint==='/preview')payload={items:articles,feeds:[]};
-   else if(endpoint==='/system')payload=health;
-   else if(endpoint==='/discover')payload={feeds:[{title:'A discovered publication',url:'https://example.com/feed.xml'}]};
-   else if(endpoint==='/one-time/preview')payload={name:'Weekend reading',items:reviewed};
-   else if(endpoint==='/first-issue/preview'||endpoint==='/first-issue/prepare')payload={preview:{id:'preview-1',status:'ready',introduction:'A few durable ideas connect the articles in this issue.',groups:[{name:'Ideas and attention',items:reviewed.slice(0,2).map((item,index)=>({groupIndex:0,index,title:item.title,source:item.source,url:item.url,excerpt:item.excerpt,warnings:[]}))}]}};
-   else if(endpoint.startsWith('/first-issue/article/'))payload={title:reviewed[0].title,url:reviewed[0].url,body:'<p>A complete article follows a patient line of inquiry through everyday life.</p>'};
-   else if(endpoint==='/settings'&&method==='PATCH')payload.settings={...payload.settings,...route.request().postDataJSON()};
-   else if(endpoint.startsWith('/feeds/')&&method==='PATCH'){const i=payload.sources.findIndex(s=>s.id===endpoint.split('/').at(-1));assert.ok(i>=0);payload.sources[i]={...payload.sources[i],...route.request().postDataJSON()};}
-   await route.fulfill({contentType:'application/json',body:JSON.stringify(payload)});
-  });
-  await page.goto(base);await page.locator('#login-submit').waitFor();await capture('sign-in',width);
-  await page.locator('#read-sample').click();await capture('public-sample',width);await page.locator('#close-modal').click();
-  await page.locator('#email').fill('reader@example.com');await page.locator('#login-submit').click();await page.locator('#code').waitFor();await capture('verification',width);
-  await page.locator('#code').fill('123456');await page.locator('#verify-form .primary').click();await page.locator('#send-now').waitFor();
-  assert.equal(await page.locator('.home-dashboard > section').count(),3);await capture('home',width);
-  await page.locator('#toggle-sources').click();assert.equal(await page.locator('#toggle-sources').getAttribute('aria-expanded'),'true');await capture('sources',width);
-  await home();await page.evaluate(()=>{state.sources[1].last_error='HTTP 503 — the publisher is temporarily unavailable.';dashboard();});await capture('source-attention',width);
-  await page.locator('.attention-row').click();await capture('source-management',width);
-  await page.locator('#manage-edit').click();await capture('source-edit',width);
-  await page.locator('#source-edit-name').fill('A renamed publication');await page.locator('#source-edit-submit').click();await page.locator('#modal').waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>state.sources.find(s=>s.id==='f2').name),'A renamed publication');await page.locator('#toast').waitFor({state:'hidden'});
-  await home();await page.locator('#add-single-feed').click();await capture('add-source',width);
-  await home();await page.locator('#import-opml').click();await capture('opml',width);
-  await page.locator('#opml-file').setInputFiles({name:'subscriptions.opml',mimeType:'text/xml',buffer:Buffer.from('<opml><body><outline text="Science"><outline text="Quanta Magazine" xmlUrl="https://www.quantamagazine.org/feed/"/><outline text="Aeon" xmlUrl="https://aeon.co/feed.rss"/></outline></body></opml>')});
-  await page.getByRole('heading',{name:'Review OPML import'}).waitFor();await capture('opml-review',width);
-  await home();await page.locator('#open-editor').click();assert.equal(await page.locator('#app').evaluate(e=>e.inert),true);await capture('editor',width);
-  await page.locator('.editor-effective summary').click();await capture('editor-instructions',width);
-  await page.locator('#editorial-brief').fill('History, science, and ideas that reward attention.');await page.locator('.editor-form-actions button').click();await page.locator('#modal').waitFor({state:'hidden'});assert.equal(await page.evaluate(()=>state.settings.editorial_brief),'History, science, and ideas that reward attention.');await page.locator('#toast').waitFor({state:'hidden'});
-  await home();await page.locator('#preview').click();await page.locator('.preview-list').waitFor();await capture('articles',width);
-  await home();await page.locator('#delivery-history').click();await page.locator('#refresh-history').waitFor();await capture('history',width);
-  await home();await page.locator('#one-time-send').click();await capture('reading-list',width);
-  await page.locator('#one-time-name').fill('Weekend reading');await page.locator('#one-time-urls').fill('https://example.com/attention');await page.locator('#review-one-time').click();await page.locator('.one-time-list').waitFor();await capture('reading-review',width);
-  await home();await page.locator('#account-menu').click();await capture('account',width);
-  await page.locator('#account-kindle').click();await capture('kindle',width);
-  await page.locator('#kindle-edit-settings').click();await capture('settings',width);
-  await home();await page.locator('#account-menu').click();await page.locator('#account-system-health').click();await page.locator('.system-metrics').waitFor();await capture('system-health',width);
-  await home();await page.evaluate(()=>{state.settings.onboarding_complete=false;state.sources=[];starterPicker();});await capture('starter-packs',width);
-  await page.evaluate(()=>{state.sources=STARTER_EDITIONS[0].sources.slice(0,3).map((source,i)=>({...source,id:'starter-'+i,enabled:true}));starterReady();});await capture('starter-ready',width);
-  await page.locator('.review-source').first().click();await capture('first-source-review',width);await page.locator('#close-modal').click();
-  await page.locator('#starter-kindle').click();await page.locator('#issue-continue').waitFor();await capture('first-issue',width);
-  await page.locator('.read-first-article').first().click();await page.locator('.first-issue-reader').waitFor();
-  assert.equal(await page.locator('.first-issue-reader').getAttribute('sandbox'),'');
-  assert.equal(await page.locator('.first-issue-reader').getAttribute('title'),reviewed[0].title);
-  assert.match(await page.frameLocator('.first-issue-reader').locator('body').innerText(),/A complete article follows/);
-  assert.ok(await page.frameLocator('.first-issue-reader').locator('body').evaluate(el=>parseFloat(getComputedStyle(el).fontSize)>=18&&el.scrollWidth<=innerWidth), 'Prepared text must be legible without horizontal scrolling');
-  await capture('first-article',width);await page.locator('#close-modal').click();
-  await page.locator('#issue-continue').click();await capture('onboarding',width);
-  await page.evaluate(()=>{state.settings.kindle_email='reader_sample@kindle.com';state.settings.paused=true;state.jobs=[{id:'first',reason:'manual',status:'queued'}];dashboard();firstRunDeliveryChoice();});await capture('first-delivery-choice',width);
-  await home();await page.evaluate(()=>{state.sources=[];state.jobs=[];state.settings.editorial_brief='';state.settings.editorial_instructions='';dashboard();});await capture('empty-home',width);
-  await home();await page.evaluate(()=>{state.settings.paused=true;dashboard();});await capture('paused-home',width);
-  await home();await page.evaluate(()=>{state.settings.onboarding_complete=false;state.settings.kindle_email='';dashboard();});await capture('setup-needed',width);
-  await home();await page.evaluate(()=>sessionUnavailable());await capture('session-error',width);
-  await home();await page.evaluate(()=>openModal('<h2>Latest articles</h2><p class="loading-state" role="status">Checking your active feeds…</p><button class="btn" onclick="closeModal()">Close</button>'));await capture('loading',width);
-  await home();await page.evaluate(()=>{api=async()=>{throw new Error('The publisher is not responding. Please try again.')};return previewModal();});await capture('preview-error',width);
-  await page.goto(base+'/privacy');await capture('privacy',width);await page.goto(base+'/terms');await capture('terms',width);
-  await page.goto(base);await page.locator('#open-editor').waitFor();
-  const targets=await page.locator('button').evaluateAll(es=>es.filter(e=>!e.closest('[hidden]')&&e.getClientRects().length).map(e=>({id:e.id,w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height})));
-  assert.deepEqual(targets.filter(e=>e.w<43.5||e.h<43.5),[],`Home targets below 44px at ${width}`);
-  await page.locator('#open-editor').focus();await page.keyboard.press('Enter');assert.equal(await page.locator('.modal-card').evaluate(e=>document.activeElement===e),true);
-  await page.keyboard.press('Shift+Tab');assert.equal(await page.locator('.editor-form-actions button').evaluate(e=>document.activeElement===e),true);
-  await page.keyboard.press('Tab');assert.equal(await page.locator('#close-modal').evaluate(e=>document.activeElement===e),true);
-  await page.keyboard.press('Escape');assert.equal(await page.locator('#open-editor').evaluate(e=>document.activeElement===e),true);
-  assert.equal(await page.evaluate(()=>document.body.classList.contains('dialog-open')),false);
-  console.log(`${engine} ${width}px: ${results.filter(r=>r.width===width).length} states; ${failures.filter(r=>r.width===width).length} failed checks`);
-  await context.close();
- }
-}catch(error){
- if(page&&!page.isClosed())await page.screenshot({path:path.join(out,'failure-viewport.png')}).catch(()=>{});
- errors.push(String(error));throw error;
-}finally{
- await fs.writeFile(path.join(out,'report.json'),JSON.stringify({engine,results,failures,errors},null,2));
- await browser.close();await new Promise(r=>server.close(r));
-}
-assert.deepEqual(errors,[],'Browser runtime errors');
-assert.equal(failures.length,0,JSON.stringify(failures,null,2));
-console.log(`PASS: ${results.length} states; no automated WCAG A/AA violations or horizontal overflow; keyboard/focus and 44px home targets verified.`);
+import fs from 'node:fs/promises';import http from 'node:http';import path from 'node:path';import assert from 'node:assert/strict';
+const root=path.resolve(import.meta.dirname,'..'),engine=process.env.BROWSER||'chromium',out=path.join(root,'test-results',engine,'publication');await fs.mkdir(out,{recursive:true});
+const sources=['Aeon','Quanta Magazine','The Marginalian','Works in Progress'];
+const items=Array.from({length:36},(_,i)=>({position:i,title:i===0?'What a forest knows about time':`An original perspective on ${['history','science','culture','cities'][i%4]} ${i+1}`,url:`https://example.com/original-${i}`,source:sources[i%4],origin:'subscribed fresh',minutes:6,section_name:['History','Science','Culture','Cities'][i%4],reason:`Placed ${i===0?'first as an accessible lead':'here as a contrasting perspective'} for its account of ${['history','science','culture','cities'][i%4]}.`}));
+const edition={id:'30000000-0000-0000-0000-000000000001',kind:'daily',title:'Long Form',created_at:'2026-10-01T13:00:00Z',items,minutes:216,featured:[0,9,18,27,1],featured_minutes:30,introduction:'A welcoming science lead, a historical detour, and a change of perspective. Start here; the rest is yours to return to.',preparation:{status:'ready'},issues:[],editorial:{organization:{status:'edited'}}};
+const reader={user:{id:'10000000-0000-0000-0000-000000000001',email:'reader@example.com'},settings:{onboarding_complete:true,kindle_email:'sample@kindle.com',paused:true,delivery_time:'06:00',timezone:'UTC',editorial_brief:'Original ideas, history and science.',editorial_instructions:''},sources:sources.map((name,i)=>({id:`f${i}`,name,url:`https://example.com/feed-${i}`,enabled:true})),sections:[],jobs:[],digests:[]};
+const server=http.createServer(async(req,res)=>{const file={'/':'index.html','/styles.css':'styles.css','/publication.css':'publication.css','/publication.js':'publication.js','/opml.js':'opml.js','/starter-editions.js':'starter-editions.js'}[new URL(req.url,'http://local').pathname];if(!file){res.writeHead(404);return res.end();}res.setHeader('Content-Type',file.endsWith('.css')?'text/css':file.endsWith('.js')?'application/javascript':'text/html');res.end(await fs.readFile(path.join(root,file)));});await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}`;
+const browser=await(engine==='webkit'?webkit:chromium).launch();const results=[],errors=[];
+try{for(const width of (process.env.WIDTHS||'320,390,1440').split(',').map(Number)){
+ const ctx=await browser.newContext({viewport:{width,height:844},isMobile:width<700,hasTouch:width<700,reducedMotion:'reduce'}),page=await ctx.newPage();let messages=[],states={},calls=[],jobCalls=0;
+ page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',async route=>{const u=new URL(route.request().url());if(u.origin===base)return route.continue();if(!u.pathname.includes('/functions/v1/app-api'))return route.abort();const endpoint=u.pathname.split('/app-api')[1],body=route.request().postDataJSON();calls.push({endpoint,body});let data;
+ if(endpoint==='/auth/verify-code')data={...reader,token:'synthetic-session'};
+ else if(endpoint==='/auth/request-code')data={};else if((endpoint==='/state'||endpoint==='/me'))data=reader;
+ else if(endpoint==='/publication/editions')data={editions:[edition]};
+ else if(endpoint==='/reader/article'){const key=`${body.edition_id}:${body.position}`,a=items[body.position||0];data={article:{...a,body:Array.from({length:48},(_,i)=>`<p>Paragraph ${i+1}: The author argues that forests change through relationships across generations. A patient observation reveals patterns invisible to short-term measurement, and complicates our assumptions about progress.</p>`).join('')},paragraphs:Array.from({length:48},(_,i)=>`Paragraph ${i+1}: The author argues that forests change through relationships across generations. A patient observation reveals patterns invisible to short-term measurement, and complicates our assumptions about progress.`),article_key:key,reading:states[key]||{progress:0,paragraph:0,saved:false}};}
+ else if(endpoint==='/reader/state'){const key=`${body.edition_id}:${body.position}`;states[key]={...states[key],...body,updated_at:new Date().toISOString()};data={ok:true};}
+ else if(endpoint==='/editor/history')data={messages};
+ else if(endpoint==='/editor/message'){const response=body.question==='Send this to my Kindle.'?{answer:'Review the exact complete edition. Nothing sent yet.',citations:[],send_request:{edition_id:body.edition_id}}:body.question.includes('less')?{answer:'I’ll use that direction in this conversation. Save it separately for future nighttime editions.',citations:[]}:body.question.includes('unavailable')?{answer:'The editor is temporarily unavailable. Your original reading remains available.',unavailable:true,citations:[]}:{answer:`The original ${items[0].title} leads this edition because its account of relationships across generations welcomes a slower reading pace. This is subscribed material. The visible paragraphs explain the author’s contrast with short-term measurement.`,citations:[{...items[0],edition_id:edition.id}]};const m={id:'message-'+messages.length,question:body.question,response,proposed_guidance:body.question.includes('less')?'Less work; more history, science and strange culture.':null};messages.push(m);data={message:m};}
+ else if(endpoint==='/editor/confirm'){messages.find(m=>m.id===body.message_id).confirmed_at=new Date().toISOString();data={ok:true};}
+ else if(endpoint==='/publication/feed')data={items,feeds:[]};else if(endpoint==='/reader/open')data={article_id:'40000000-0000-0000-0000-000000000001'};
+ else if(endpoint==='/publication/send')data={job_id:'delivery-job',status:'queued'};
+ else if(endpoint==='/publication/job')data={job:{status:++jobCalls===1?'running':'partial',result:{issues:['One publisher image could not be included.']}},edition_id:edition.id};
+ else if(endpoint==='/reader/library')data={states:Object.entries(states).map(([article_key,s])=>({article_key,...s})),articles:[]};else throw new Error('Unexpected API '+endpoint);
+ await route.fulfill({contentType:'application/json',body:JSON.stringify(data)});});
+ async function capture(name){await page.screenshot({path:path.join(out,`${width}-${name}.png`),fullPage:true});const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);const violations=(await new AxeBuilder({page}).exclude('#original-reader').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)}));results.push({width,name,overflow,violations});assert.equal(overflow,false,`${name} horizontal overflow ${width}`);assert.deepEqual(violations,[],`${name} accessibility ${width}`);}
+ await page.goto(base);await page.locator('#email').fill('reader@example.com');await page.locator('#login-submit').click();await page.locator('#code').fill('123456');await page.locator('#verify-form .primary').click();await page.locator('#prepare-publication').waitFor();await capture('today');
+ assert.equal(await page.locator('.unread-count').count(),0);await page.locator('.today-edition .edition-link').click();await page.locator('.featured-reading .publication-item').first().waitFor();assert.equal(await page.locator('.featured-reading .publication-item').count(),5);assert.equal(await page.locator('.further-reading .publication-item').count(),31);await capture('edition');await page.locator('.further-reading summary').click();assert.equal(await page.locator('.publication-item:visible').count(),36);await page.locator('.further-reading summary').click();
+ await page.getByRole('link',{name:'Read the edition',exact:true}).click();const frame=page.frameLocator('#original-reader');await frame.locator('p').first().waitFor();assert.equal(await page.getByRole('link',{name:'Next original →'}).getAttribute('href'),`#read/${edition.id}/9/featured`,'Reader follows finite featured sequence');await frame.locator('body').evaluate(e=>window.scrollTo(0,800));await page.waitForTimeout(500);await page.locator('#save-reading').click();await capture('reader');const position=await frame.locator('body').evaluate(()=>scrollY);assert.ok(position>500);
+ await page.locator('#discuss-reading').click();await page.locator('#editor-question').fill('I don’t understand the author’s argument in these two paragraphs.');await page.locator('#ask-editor').click();await page.locator('.editor-exchange').waitFor();assert.ok(calls.find(c=>c.endpoint==='/editor/message').body.paragraph>0);await capture('discussion');await page.reload();await page.getByRole('link',{name:'Return to reading →'}).waitFor();assert.match(await page.locator('.reading-context').innerText(),/What a forest knows/,'Discussion keeps the actual article across reload');await page.getByRole('link',{name:'Return to reading →'}).click();await frame.locator('p').first().waitFor();await page.waitForTimeout(250);assert.ok(Math.abs(await frame.locator('body').evaluate(()=>scrollY)-position)<40,'reading position retained');
+ await page.goBack();await page.locator('#editor-question').waitFor();await page.locator('#editor-question').fill('I want less AI and work at night and more history, science and strange culture.');await page.locator('#ask-editor').click();await page.locator('.confirm-guidance').waitFor();assert.equal(calls.filter(c=>c.endpoint==='/editor/confirm').length,0);await capture('steering');await page.locator('.confirm-guidance').click();assert.equal(calls.filter(c=>c.endpoint==='/editor/confirm').length,1);
+ await page.locator('#editor-question').fill('unavailable');await page.locator('#ask-editor').click();await page.locator('.editor-answer.notice').waitFor();await capture('ai-unavailable');
+ await page.getByRole('link',{name:'Explore',exact:true}).click();await page.locator('#raw-feed').click();await page.locator('.raw-feed-item').first().waitFor();assert.equal(await page.locator('.raw-feed-item').count(),36);await capture('raw-feed');await page.locator('.raw-feed-item').first().click();await frame.locator('p').first().waitFor();
+ await page.goto(base+'/#edition/'+edition.id);await page.locator('#send-edition').waitFor();await page.getByRole('link',{name:'Editor',exact:true}).click();await page.locator('#editor-question').fill('Send this to my Kindle.');await page.locator('#ask-editor').click();await page.locator('#confirm-edition-send').waitFor();assert.equal(calls.filter(c=>c.endpoint==='/publication/send').length,0,'Discussion opens review before any send');assert.equal(calls.filter(c=>c.endpoint==='/editor/message').at(-1).body.edition_id,edition.id);await capture('exact-send');await page.locator('#close-modal').click();await page.locator('#editor-question').fill('Why this edition?');await page.locator('#ask-editor').click();await page.locator('.editor-exchange').last().getByText(/The original/).waitFor();await page.locator('.review-send-request').click();await page.locator('#confirm-edition-send').waitFor();await page.locator('#confirm-edition-send').click();await page.getByText('Submitted with notes.',{exact:true}).waitFor();await capture('delivery-status');assert.match(await page.locator('#delivery-status').innerText(),/Arrival|arrival/);assert.match(await page.locator('#delivery-issues').innerText(),/publisher image/);await page.reload();await page.getByText('Submitted with notes.',{exact:true}).waitFor();
+ await page.getByRole('link',{name:'Library',exact:true}).click();await page.locator('.library-saved').waitFor();await capture('library');assert.ok(states[`${edition.id}:0`].saved);await ctx.close();
+ }}finally{await browser.close();server.close();await fs.writeFile(path.join(out,'results.json'),JSON.stringify({results,errors},null,2));}assert.deepEqual(errors,[]);console.log(`${engine}: ${results.length} publication screenshots; no overflow, accessibility or script errors.`);

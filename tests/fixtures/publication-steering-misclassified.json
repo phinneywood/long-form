@@ -1,0 +1,18 @@
+{
+  "question": "This is interesting, but I want less AI/work material at night and more history, science and strange cultural stories.",
+  "response": {
+    "action": "compose",
+    "answer": "I\u2019ll treat this as temporary guidance for this conversation: for a nighttime edition, favor history, science, and strange cultural stories, and avoid AI/work material where the available eligible articles allow. I can\u2019t assemble the requested 3\u20135-article edition yet: no edition, article library, or article records were supplied, and I won\u2019t invent titles or selection reasons. No reading time was specified.",
+    "minutes": 35,
+    "guidance": "Nighttime editorial request: Create a finite edition of 3\u20135 original articles, prioritizing history, science, and strange cultural stories; minimize AI/work material where eligible articles permit. Choose only from available eligible originals and preserve all subscribed originals in the daily edition. Do not treat this temporary request as a durable settings change.",
+    "citations": [],
+    "unavailable": false,
+    "base_guidance": "",
+    "compose_request": {
+      "minutes": 35,
+      "request": "This is interesting, but I want less AI/work material at night and more history, science and strange cultural stories."
+    }
+  },
+  "expected_action": "steer",
+  "source": "live isolated production evaluation, 2026-10-01"
+}

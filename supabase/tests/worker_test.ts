@@ -8,11 +8,12 @@ Deno.env.set("OPENAI_API_KEY", "test-only-key");
 const { processJob, handleWorkerRequest } = await import("../functions/worker/core.ts");
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 
-async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview" | "resend") {
+async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview" | "publication_preview" | "resend") {
   const original = globalThis.fetch;
   const job: any = { id: "job-1", user_id: "user-1", status: "queued", attempts: mode === "failed" ? 2 : 0, reason: "manual", created_at: new Date().toISOString(), lookback_hours: 168 };
   if(mode === "scheduled" || mode === "rescheduled")Object.assign(job,{reason:"scheduled",section_id:"section-1",schedule_version:1,lookback_hours:192});
   if(mode === "test")Object.assign(job,{reason:"test",lookback_hours:168});
+  if(mode === "publication_preview")Object.assign(job,{reason:"publication_preview",result:{publication_kind:"tonight",target_minutes:35}});
   if(mode === "first_run_preview")Object.assign(job,{reason:"first_run_preview"});
   if(mode === "resend")Object.assign(job,{reason:"manual",result:{resend_of_job_id:"source-job",resend_of_created_at:"2026-09-27T12:00:00Z",resend_of_title:"Long Form — September 27, 2026"}});
   let outbox: any = mode === "resend" ? {
@@ -74,14 +75,23 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
         const body = "Substantial original reading text. ".repeat(24);
         return new Response(`<rss><channel>${Array.from({length:5},(_,i)=>`<item><title>Test article ${i+1}</title><link>https://8.8.8.8/article-${i+1}</link><content:encoded><![CDATA[<p>${body}</p><img src="https://8.8.8.8/test-${i+1}.png" alt="Test image ${i+1}">]]></content:encoded></item>`).join("")}</channel></rss>`);
       }
-      return new Response(`<rss><channel><item><title>Example article</title><link>https://8.8.8.8/article</link>${mode==='scheduled'?`<pubDate>${new Date(Date.now()-5*86400_000).toUTCString()}</pubDate>`:''}<content:encoded><![CDATA[<p>${"Substantial original reading text. ".repeat(24)}</p>${["prepare_retry","first_run_preview"].includes(mode)?'<img src="https://8.8.8.8/checkpoint.png" alt="Checkpoint image">':''}]]></content:encoded></item></channel></rss>`);
+      return new Response(`<rss><channel><item><title>Example article</title><link>https://8.8.8.8/article</link>${mode==='scheduled'?`<pubDate>${new Date(Date.now()-5*86400_000).toUTCString()}</pubDate>`:''}<content:encoded><![CDATA[<p>${"Substantial original reading text. ".repeat(24)}</p>${["prepare_retry","first_run_preview","publication_preview"].includes(mode)?'<img src="https://8.8.8.8/checkpoint.png" alt="Checkpoint image">':''}]]></content:encoded></item></channel></rss>`);
     }
     assert(url.hostname === "database.example.invalid", "Unexpected network call " + url.hostname);
     if (url.pathname.includes("/rpc/kick_digest_worker")) return Response.json(1);
+    if(url.pathname.includes('/rpc/checkpoint_digest_preparation')){const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);job.result={...(job.result||{}),preparation_manifest:body.p_manifest};manifestWrites.push(structuredClone(body.p_manifest));return Response.json(true);}
+    if(url.pathname.includes('/rpc/archive_publication_edition')){const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);return Response.json('publication-id');}
+    if (url.pathname.includes('/rpc/freeze_delivery_payload')) {
+      const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);
+      if(failOutboxInsert){failOutboxInsert=false;return Response.json({message:'Outbox unavailable after manifest freeze'},{status:500});}
+      if(!outbox)outbox={job_id:job.id,payload:body.p_payload,first_send_at:null,provider_email_id:null};
+      return Response.json({first_send_at:outbox.first_send_at,provider_email_id:outbox.provider_email_id});
+    }
     const table = url.pathname.split('/').at(-1);
     const body = req.method === "GET" ? null : await req.json();
     let rows: any[] = [];
     if (table === "digest_jobs") {
+      if(mode === "publication_preview" && body?.status === "ready" && body?.result?.preparation_manifest) return Response.json({message:"Oversized final status write"},{status:500});
       if (body?.status === "sent" && failFinalUpdate) { failFinalUpdate = false;return Response.json({ message: "Final status database failure" }, { status: 500 }); }
       if (body?.result?.preparation_manifest) manifestWrites.push(structuredClone(body.result.preparation_manifest));
       if (body) Object.assign(job, body);
@@ -98,6 +108,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       if (idFilter?.startsWith("eq.")) rows = rows.filter(row => row.id === idFilter.slice(3));
     }
     else if (table === "feeds") { if (body) feedUpdates.push(body);else rows = feeds; }
+    else if (table === "publication_editions") rows = [];
     else if (table === "digests") rows = [{ id: "digest-1" }];
     else if (table === "pending_issue_articles") { if(req.method === "DELETE")pendingDeletes++;rows = []; }
     else if (table === "article_deliveries") {
@@ -146,6 +157,15 @@ Deno.test("first issue preparation freezes the EPUB without sending, then sends 
   assert(r.sendsAfterInitial === 0 && r.manifestsAfterInitial === 1);
   assert(r.sends === 1 && r.job.status === "sent");
   assert(r.continuations.join(",") === "frozen-manifest,prepared-media", "Media preparation and packaging need separate invocations");
+});
+
+Deno.test("publication preparation keeps the frozen media out of its terminal status record",async()=>{
+  const r=await scenario("publication_preview");
+  assert(r.job.status==="ready" && r.sends===0 && r.articleDeliveryWrites===0);
+  assert(!r.job.result.preparation_manifest,"Ready status must not rewrite the large frozen manifest");
+  assert(r.job.result.articles===1 && r.job.result.preview_review.groups.length===1);
+  const zip=await JSZip.loadAsync(r.outbox.payload.email.attachments[0].content,{base64:true});
+  assert(Object.keys(zip.files).some(name=>name.startsWith("OEBPS/images/")),"The exact sendable EPUB retains prepared media");
 });
 
 Deno.test("worker distinguishes an empty edition from failed sources", async () => {

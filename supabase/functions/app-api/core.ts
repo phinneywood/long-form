@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { fetchPublicText } from "../_shared/network.ts";
-import { XMLParser } from "npm:fast-xml-parser@5.11.1";
+import { feedCandidates } from "../_shared/feed-candidates.ts";
 
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -205,8 +205,5 @@ export async function discoverFeeds(input:string){
   throw new Error("Long Form couldn't find an RSS or Atom feed for this site. Try a direct feed URL or search with Feedsearch.");
 }
 export async function probe(url:string){const feeds=await discoverFeeds(url);return feeds[0]}
-function arr(x:any){return x==null?[]:Array.isArray(x)?x:[x]}
-function text(x:any):string{if(x==null)return"";if(typeof x==="string"||typeof x==="number")return String(x);if(typeof x==="object"){if("__cdata"in x)return text(x.__cdata);if("#text"in x)return text(x["#text"])}return""}
-function link(x:any):string{if(typeof x==="string")return x;for(const v of arr(x)){if(typeof v==="string")return v;if(v&&typeof v==="object"&&v["@_href"])return String(v["@_href"])}return""}
-export async function preview(feed:any){try{const raw=await safeFetch(feed.url);if(!looksLikeFeed(raw))throw new Error("This source did not return RSS or Atom.");const p=new XMLParser({ignoreAttributes:false,attributeNamePrefix:"@_",textNodeName:"#text",cdataPropName:"__cdata"}),d:any=p.parse(raw);let es:any[]=[];if(d?.rss?.channel?.item)es=arr(d.rss.channel.item);else if(d?.feed?.entry)es=arr(d.feed.entry);else if(d?.["rdf:RDF"]?.item)es=arr(d["rdf:RDF"].item);const items=es.slice(0,10).map(e=>{const raw=text(e.pubDate||e.published||e.updated||e["dc:date"]),dt=raw?new Date(raw):null;return{title:text(e.title).replace(/<[^>]+>/g,"").trim()||"Untitled",url:link(e.link)||text(e.guid||e.id),published_at:dt&&!isNaN(+dt)?dt.toISOString():null,source:feed.name}}).filter(x=>x.url);const now=new Date().toISOString();await admin.from("feeds").update({last_fetch_at:now,last_success_at:now,last_error:null,consecutive_failures:0}).eq("id",feed.id);return{feed_id:feed.id,items}}catch(e){const m=e instanceof Error?e.message:String(e),failures=Number(feed.consecutive_failures||0)+1;await admin.from("feeds").update({last_fetch_at:new Date().toISOString(),last_error:m.slice(0,500),consecutive_failures:failures}).eq("id",feed.id);return{feed_id:feed.id,items:[],error:m}}}
+export async function preview(feed:any,limit=10){try{const raw=await safeFetch(feed.url);if(!looksLikeFeed(raw))throw new Error("This source did not return RSS or Atom.");const items=feedCandidates(raw,feed.name,limit);const now=new Date().toISOString();await admin.from("feeds").update({last_fetch_at:now,last_success_at:now,last_error:null,consecutive_failures:0}).eq("id",feed.id);return{feed_id:feed.id,items}}catch(e){const m=e instanceof Error?e.message:String(e),failures=Number(feed.consecutive_failures||0)+1;await admin.from("feeds").update({last_fetch_at:new Date().toISOString(),last_error:m.slice(0,500),consecutive_failures:failures}).eq("id",feed.id);return{feed_id:feed.id,items:[],error:m}}}
 export function emailConfigured(){return Boolean(RESEND_API_KEY)}

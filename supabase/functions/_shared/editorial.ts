@@ -5,6 +5,7 @@ export type EditorialDecision = {
   id: string;
   section_name: string;
   topic_name: string | null;
+  reason?: string;
 };
 
 export type EditorialPlan = { articles: EditorialDecision[] };
@@ -55,8 +56,9 @@ function schemaFor(articleIds: string[]) {
             id: { type: "string", enum: articleIds },
             section_name: { type: "string", minLength: 2, maxLength: 60 },
             topic_name: { type: ["string", "null"], minLength: 2, maxLength: 60 },
+            reason: { type: "string", minLength: 2, maxLength: 500 },
           },
-          required: ["id", "section_name", "topic_name"],
+          required: ["id", "section_name", "topic_name", "reason"],
           additionalProperties: false,
         },
       },
@@ -91,7 +93,7 @@ export function applyEditorialPlan(
 ): { articles: EditorializedArticle[]; sections: number; topics: number; other: number } {
   const expected = new Set(articles.map((_article, index) => candidateId(index)));
   const seen = new Set<string>();
-  const prepared: Array<{ article: EpubArticle; section: string; topic: string | null }> = [];
+  const prepared: Array<{ article: EpubArticle; section: string; topic: string | null; reason: string | null }> = [];
   const canonicalSections = new Map<string, string>();
 
   if (!plan || !Array.isArray(plan.articles) || plan.articles.length !== articles.length) {
@@ -114,7 +116,7 @@ export function applyEditorialPlan(
       section = canonicalSections.get(sectionKey)!;
     }
     const topic = decision.topic_name == null ? null : cleanLabel(decision.topic_name, "topic");
-    prepared.push({ article, section, topic });
+    prepared.push({ article, section, topic, reason: typeof decision.reason === "string" ? decision.reason.slice(0,500) : null });
   }
 
   if (seen.size !== expected.size) throw new Error("Editorial plan omitted one or more eligible articles.");
@@ -141,7 +143,7 @@ export function applyEditorialPlan(
   let other = 0;
   const output: EditorializedArticle[] = [];
 
-  for (const { article, section, topic } of finalPrepared) {
+  for (const { article, section, topic, reason } of finalPrepared) {
     const topicKey = topic ? `${section.toLowerCase()}:${topic.toLowerCase()}` : "";
     const retainedTopic = topic && (topicCounts.get(topicKey) || 0) >= 2 ? topic : null;
     sections.add(section);
@@ -153,6 +155,7 @@ export function applyEditorialPlan(
       section_name: section,
       editorial_topic: retainedTopic,
       editorial_position: output.length,
+      editorial_decision_reason: reason,
     });
   }
 
@@ -223,6 +226,7 @@ export async function editorializeIssue(
     "Do not write summaries, introductions, blurbs, or any other reader-facing prose.",
     "Do not rewrite article titles or article bodies.",
     "Return every input id exactly once, in the reading order you recommend.",
+    "Record a concise reason for each placement grounded in content, the brief, pacing and thematic role. For the first article explain why it leads. Retain this evidence separately from original text.",
   ].join("\n");
 
   const fetchImpl = options.fetchImpl || fetch;

@@ -1,0 +1,36 @@
+{
+  "source": "isolated production evaluation, 2026-10-01; constrained selection before bounded image conversion",
+  "distribution": {
+    "total": 5,
+    "passed": 0
+  },
+  "runs": [
+    {
+      "number": 1,
+      "error": "Preparation did not reach a terminal state in three minutes.",
+      "pass": false
+    },
+    {
+      "number": 2,
+      "error": "/publication/compose 409: Another edition is still being prepared. You can open your available reading or wait for it to finish.",
+      "pass": false
+    },
+    {
+      "number": 3,
+      "error": "/publication/compose 409: Another edition is still being prepared. You can open your available reading or wait for it to finish.",
+      "pass": false
+    },
+    {
+      "number": 4,
+      "error": "/publication/compose 409: Another edition is still being prepared. You can open your available reading or wait for it to finish.",
+      "pass": false
+    },
+    {
+      "number": 5,
+      "error": "/publication/compose 409: Another edition is still being prepared. You can open your available reading or wait for it to finish.",
+      "pass": false
+    }
+  ],
+  "worker_event": "CPU Time exceeded during image_hydration",
+  "expected": "Native image media or explicit WebP omission; original text and finite edition reach ready"
+}

@@ -1,0 +1,7 @@
+{
+  "failure": "A prepared 5.5 MB EPUB timed out while freezing its outbox payload under the default eight-second REST database deadline.",
+  "epub_bytes": 5547918,
+  "articles": 3,
+  "error": "canceling statement due to statement timeout",
+  "expected": "Retry the same prepared artifact through a backend-only immutable freeze with a bounded function timeout; never send before persistence succeeds."
+}
