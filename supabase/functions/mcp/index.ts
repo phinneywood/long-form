@@ -192,6 +192,38 @@ const TOOLS: any[] = [
     _meta: { securitySchemes: WRITE_SECURITY }
   },
   {
+    name: "send_packet",
+    description: "Queue a standalone Long Form EPUB from 1–20 article URLs and send it to the user's configured Kindle. Use dedupe_key to make repeated automation runs idempotent.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", minLength: 1, maxLength: 80, description: "Packet title shown on the EPUB and email subject." },
+        urls: { type: "array", minItems: 1, maxItems: 20, items: { type: "string", minLength: 1 }, description: "Public article URLs to include, in reading order." },
+        dedupe_key: { type: "string", minLength: 1, maxLength: 120, pattern: "^[A-Za-z0-9._:-]+$", description: "Optional caller-chosen idempotency suffix, for example tonights-reading:2026-09-30. Reusing it with the same packet returns the existing job instead of sending twice." }
+      },
+      required: ["name","urls"],
+      additionalProperties: false
+    },
+    outputSchema: { type: "object", additionalProperties: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    securitySchemes: WRITE_SECURITY,
+    _meta: { securitySchemes: WRITE_SECURITY }
+  },
+  {
+    name: "get_packet_status",
+    description: "Get the current status of a standalone Long Form packet job created by send_packet.",
+    inputSchema: {
+      type: "object",
+      properties: { job_id: { type: "string", minLength: 1, description: "Job ID returned by send_packet." } },
+      required: ["job_id"],
+      additionalProperties: false
+    },
+    outputSchema: { type: "object", additionalProperties: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    securitySchemes: READ_SECURITY,
+    _meta: { securitySchemes: READ_SECURITY }
+  },
+  {
     name: "send_now",
     description: "Queue the user's current Long Form issue for immediate delivery to the configured Send-to-Kindle address.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -376,6 +408,24 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
         editorial_instructions: String(after?.settings?.editorial_instructions || ""),
       });
     }
+    case "send_packet": {
+      const nameArg = String(args?.name || "").trim();
+      const urls = Array.isArray(args?.urls) ? args.urls.map((url: unknown) => String(url || "").trim()) : [];
+      const dedupeKey = args?.dedupe_key === undefined ? undefined : String(args.dedupe_key || "").trim();
+      if (!nameArg || nameArg.length > 80) return toolResult({ error: "Packet name must be 1–80 characters." }, true);
+      if (!urls.length || urls.length > 20) return toolResult({ error: "Add between 1 and 20 article URLs." }, true);
+      if (dedupeKey !== undefined && !/^[A-Za-z0-9._:-]{1,120}$/.test(dedupeKey)) return toolResult({ error: "Invalid dedupe key." }, true);
+      return toolResult(await apiAsUser(auth.userId, "/one-time/queue", "POST", {
+        name: nameArg,
+        urls,
+        ...(dedupeKey === undefined ? {} : { dedupe_key: dedupeKey })
+      }));
+    }
+    case "get_packet_status": {
+      const jobId = String(args?.job_id || "").trim();
+      if (!/^[0-9a-f-]{36}$/i.test(jobId)) return toolResult({ error: "A valid packet job ID is required." }, true);
+      return toolResult(await apiAsUser(auth.userId, `/one-time/jobs/${jobId}`, "GET"));
+    }
     case "send_now":
       return toolResult(await apiAsUser(auth.userId, "/send-now", "POST", {}));
     default:
@@ -411,7 +461,7 @@ Deno.serve(async (req: Request) => {
         protocolVersion,
         capabilities: { tools: {} },
         serverInfo: { name: "long-form", version: "0.2.0" },
-        instructions: "Manage Long Form Kindle editions and RSS/Atom sources. Each edition becomes a separate EPUB delivered to the user's Kindle."
+        instructions: "Manage Long Form sources, editor settings, daily issues, and standalone article packets delivered to the user's Kindle."
       });
     }
     if (msg.method === "ping") return rpcResult(id, {});

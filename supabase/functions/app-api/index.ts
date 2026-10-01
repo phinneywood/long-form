@@ -314,6 +314,37 @@ Deno.serve(async(req)=>{
       logEvent("next_issue.articles_added",{request_id:requestId,user_id:user.id,name,articles:urls.length});
       return json({ok:true,queued_for_next_issue:true,articles:urls.length,name},202);
     }
+    if(route==="/one-time/queue"&&req.method==="POST"){
+      const body=await req.json().catch(()=>({}));
+      const{name,urls}=oneTimePayload(body);
+      const dedupeKey=String(body?.dedupe_key||crypto.randomUUID()).trim();
+      if(!/^[A-Za-z0-9._:-]{1,120}$/.test(dedupeKey))return json({error:"Dedupe key must be 1–120 letters, numbers, dots, underscores, colons, or hyphens."},400);
+      const idempotencyKey=`one-time:${user.id}:${dedupeKey}`;
+      const queued=await admin.rpc("queue_one_time_packet",{
+        p_user_id:user.id,
+        p_packet_name:name,
+        p_article_urls:urls,
+        p_idempotency_key:idempotencyKey
+      });
+      if(queued.error)throw queued.error;
+      const row=Array.isArray(queued.data)?queued.data[0]:queued.data;
+      if(!row?.job_id)throw new Error("Long Form did not return a queued packet job.");
+      const job=await admin.from("digest_jobs")
+        .select("id,reason,status,packet_name,article_urls,idempotency_key,result,error,created_at,started_at,finished_at")
+        .eq("id",row.job_id).eq("user_id",user.id).single();
+      if(job.error)throw job.error;
+      logEvent("one_time.queued",{request_id:requestId,user_id:user.id,job_id:row.job_id,created:Boolean(row.created),worker_triggered:Boolean(row.worker_request_id)});
+      return json({ok:true,created:Boolean(row.created),worker_triggered:Boolean(row.worker_request_id),job:job.data},202);
+    }
+    const oneTimeStatus=route.match(/^\/one-time\/jobs\/([0-9a-f-]+)$/i);
+    if(oneTimeStatus&&req.method==="GET"){
+      const job=await admin.from("digest_jobs")
+        .select("id,reason,status,packet_name,article_urls,idempotency_key,result,error,created_at,started_at,finished_at")
+        .eq("id",oneTimeStatus[1]).eq("user_id",user.id).eq("reason","one_time").maybeSingle();
+      if(job.error)throw job.error;
+      if(!job.data)return json({error:"One-time packet job not found."},404);
+      return json({job:job.data});
+    }
     if(route==="/resend"&&req.method==="POST"){
       const b=await req.json().catch(()=>({})),sourceJobId=String(b.job_id||""),requestId=String(b.request_id||crypto.randomUUID());
       if(!/^[0-9a-f-]{36}$/i.test(sourceJobId)||!/^[0-9a-f-]{36}$/i.test(requestId))return json({error:"Invalid resend request."},400);
