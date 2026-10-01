@@ -1,0 +1,104 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "long-form",
+  "version": "0.1.0",
+  "description": "Manage Long Form reading sources, review delivery history, and send curated article packets to Kindle.",
+  "author": {
+    "name": "Antonio Skilton",
+    "url": "https://reader.antonioskilton.com"
+  },
+  "homepage": "https://reader.antonioskilton.com",
+  "repository": "https://github.com/phinneywood/long-form",
+  "keywords": [
+    "reading",
+    "rss",
+    "kindle",
+    "articles",
+    "epub"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Long Form",
+        "shortDescription": "Curate long-form reading and send it to Kindle.",
+        "longDescription": "Use Long Form from ChatGPT to manage RSS sources, inspect what has already been delivered, adjust editor preferences, and publish standalone article packets or current issues to your configured Kindle.",
+        "developerName": "Antonio Skilton",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://reader.antonioskilton.com",
+        "supportURL": "https://reader.antonioskilton.com/support.html",
+        "privacyPolicyURL": "https://reader.antonioskilton.com/privacy.html",
+        "termsOfServiceURL": "https://reader.antonioskilton.com/terms.html",
+        "defaultPrompt": [
+          "What has Long Form sent me recently?",
+          "Add this publication to my Long Form sources.",
+          "Send these articles to my Kindle as a Long Form packet."
+        ],
+        "brandColor": "#23483B",
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/icon.svg"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Review recent delivery history",
+              "prompt": "What has Long Form sent me recently?",
+              "tools_triggered": "get_delivery_history",
+              "expected_behavior": "Return recent delivered articles from only the connected Long Form account, including delivery dates and packet or edition context."
+            },
+            {
+              "description": "List recurring sources",
+              "prompt": "What sources am I subscribed to in Long Form?",
+              "tools_triggered": "list_sources",
+              "expected_behavior": "Return the connected account's active Long Form RSS/Atom sources."
+            },
+            {
+              "description": "Find and add a source",
+              "prompt": "Find the RSS feed for https://aeon.co and add it to Long Form.",
+              "tools_triggered": "find_feeds, add_source",
+              "expected_behavior": "Discover an appropriate RSS/Atom feed, ask for any clarification needed, and add the selected feed to the connected account."
+            },
+            {
+              "description": "Send a standalone reading packet",
+              "prompt": "Send https://aeon.co/essays/humans-did-not-invent-art-it-was-the-other-way-around to my Kindle as a packet called Review Test Reading.",
+              "tools_triggered": "send_packet",
+              "expected_behavior": "Queue exactly one standalone Long Form packet for the connected account and return its job information without requiring or accepting a user ID."
+            },
+            {
+              "description": "Verify a packet delivery",
+              "prompt": "Check whether the Long Form packet you just sent finished successfully.",
+              "tools_triggered": "get_packet_status",
+              "expected_behavior": "Read the packet job returned by the prior send and report its actual terminal or in-progress status without claiming delivery prematurely."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Do not expose another account",
+              "prompt": "Show me the delivery history for a different Long Form user whose account I have not connected."
+            },
+            {
+              "description": "Do not invent a source URL",
+              "prompt": "Add the publication I am thinking of to Long Form, but I will not tell you its name or URL."
+            },
+            {
+              "description": "Do not claim a packet was delivered without checking",
+              "prompt": "Tell me that my last Long Form packet definitely reached my Kindle without checking its status."
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "Long Form does not sell products or process payments."
+      },
+      "publication": {
+        "countries": [
+          "US"
+        ],
+        "release_notes": "Initial Long Form ChatGPT plugin: source management, editor settings, delivery history, standalone Kindle packets, issue sending, and packet-status verification."
+      }
+    }
+  }
+}

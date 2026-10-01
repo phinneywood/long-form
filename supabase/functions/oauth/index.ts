@@ -169,6 +169,14 @@ function consentHtml(f: Record<string,string>, clientName: string, error = "") {
       <button class="btn" type="submit">Email me a sign-in code</button>
     </form>
     <p class="muted">Long Form never gives ChatGPT your Kindle email address as an input credential. Access can be revoked by expiring the OAuth connection.</p>
+    <details style="margin-top:20px"><summary class="muted">Plugin reviewer sign-in</summary>
+      <form method="post" action="${ISSUER}/oauth/reviewer-login">
+        ${hidden(f)}
+        <label>Review account email</label><input class="input" type="email" name="email" autocomplete="username" required>
+        <label>Review account password</label><input class="input" type="password" name="password" autocomplete="current-password" required>
+        <button class="btn" type="submit">Connect review account</button>
+      </form>
+    </details>
   `);
 }
 function verifyHtml(f: Record<string,string>, email: string, clientName: string, error = "") {
@@ -248,6 +256,37 @@ Deno.serve(async (req: Request) => {
       const f = fieldsFromUrl(new URL(req.url));
       const { meta } = await validateAuthFields(f);
       return html(consentHtml(f, String(meta.client_name || "ChatGPT")));
+    }
+
+    if (route === "/reviewer-login" && req.method === "POST") {
+      const form = await req.formData();
+      const f = authFieldsFromForm(form);
+      const { scopes, meta } = await validateAuthFields(f);
+      const email = normalizeEmail(form.get("email"));
+      const password = String(form.get("password") || "");
+      if (!validEmail(email) || !password) return html(consentHtml(f, String(meta.client_name || "ChatGPT"), "Enter the review account credentials."), 400);
+      const { data, error } = await admin.rpc("plugin_review_authenticate", {
+        p_email: email,
+        p_password_hash: await sha256(password)
+      });
+      if (error || !Array.isArray(data) || !data.length) return html(consentHtml(f, String(meta.client_name || "ChatGPT"), "Review account credentials are not valid."), 401);
+      const rawCode = token("mr_code_", 32);
+      const stored = await admin.rpc("oauth_store_authorization_code", {
+        p_code_hash: await sha256(rawCode),
+        p_user_id: data[0].user_id,
+        p_client_id: f.client_id,
+        p_redirect_uri: f.redirect_uri,
+        p_code_challenge: f.code_challenge,
+        p_scopes: scopes,
+        p_resource: f.resource,
+        p_expires_at: new Date(Date.now() + 5 * 60_000).toISOString()
+      });
+      if (stored.error) throw stored.error;
+      const redirect = new URL(f.redirect_uri);
+      redirect.searchParams.set("code", rawCode);
+      if (f.state) redirect.searchParams.set("state", f.state);
+      redirect.searchParams.set("iss", ISSUER);
+      return new Response(null, { status: 302, headers: { Location: redirect.toString(), "Cache-Control": "no-store" } });
     }
 
     if (route === "/request-code" && req.method === "POST") {
