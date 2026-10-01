@@ -3,6 +3,9 @@ let editions=[],publicationEpoch=0,currentReading=null,readerFrame=null,readingS
 let editionRequest=null,nightRequest=null;
 const localReadingKey=k=>`longFormReading:${state?.user?.id}:${k}`;
 const currentRoute=()=>location.hash.slice(1)||'today';
+const readingContextKey=()=>`longFormReadingContext:${state?.user?.id}`;
+function rememberReading(){if(currentReading)sessionStorage.setItem(readingContextKey(),JSON.stringify(currentReading));}
+const readerHref=r=>r.edition_id?`#read/${r.edition_id}/${r.position}${r.reader_path==='featured'?'/featured':''}`:`#raw/${r.article_id}`;
 function publicationNav(active){return `<nav class="publication-nav" aria-label="Publication"><a href="#today" ${active==='today'?'aria-current="page"':''}>Today</a><a href="#explore" ${active==='explore'?'aria-current="page"':''}>Explore</a><a href="#editor" ${active==='editor'?'aria-current="page"':''}>Editor</a><a href="#library" ${active==='library'?'aria-current="page"':''}>Library</a></nav>`;}
 function publicationShell(content,active='today'){
   app.innerHTML=shell(publicationNav(active)+`<div class="publication-page">${content}</div>`,'<button class="btn account-menu-btn" id="account-menu" aria-label="Account menu">Account</button>');
@@ -16,6 +19,7 @@ const dateLabel=value=>new Intl.DateTimeFormat('en-US',{month:'long',day:'numeri
 const readableStatus=e=>['ready','sent','partial'].includes(e.preparation?.status);
 function editionList(e){return `<a class="edition-link" href="#edition/${esc(e.id)}"><span class="micro-label">${esc(e.kind==='tonight'?'Tonight’s Reading':'Daily edition')} · ${esc(dateLabel(e.created_at))}</span><h2>${esc(e.title)}</h2><p>${e.featured.length} featured originals · approximately ${e.featured_minutes} min<span class="publication-item-meta">Complete edition: ${e.items.length} originals · ${e.minutes} min</span></p><span class="quiet-link">Open edition →</span></a>`;}
 async function publicationRoute(){
+  if(!currentReading){try{currentReading=JSON.parse(sessionStorage.getItem(readingContextKey())||'null');}catch{}}
   const epoch=++publicationEpoch,route=currentRoute();readerFrame=null;
   try{
     if(route==='explore')return explorePage();
@@ -24,7 +28,7 @@ async function publicationRoute(){
     if(!editions.length||route==='today'||route==='library')await loadEditions();if(epoch!==publicationEpoch)return;
     if(route.startsWith('delivery/'))return await deliveryStatusPage(route.split('/')[1],route.split('/')[2]);
     if(route.startsWith('edition/')){const e=editionById(route.split('/')[1]);if(!e)throw new Error('This edition could not be found.');return editionPage(e);}
-    if(route.startsWith('read/'))return await readPage({edition_id:route.split('/')[1],position:Number(route.split('/')[2])},epoch);
+    if(route.startsWith('read/'))return await readPage({edition_id:route.split('/')[1],position:Number(route.split('/')[2]),reader_path:route.split('/')[3]==='featured'?'featured':'complete'},epoch);
     if(route.startsWith('raw/'))return await readPage({article_id:route.split('/')[1]},epoch);
     if(route==='library')return await libraryPage(epoch);
     return todayPage();
@@ -55,29 +59,31 @@ async function preparationPage(jobId){
   if(epoch===publicationEpoch)document.querySelector('#preparation-status').innerHTML='Preparation is continuing. <button class="btn" id="resume-preparation">Check again</button>';
   const resume=document.querySelector('#resume-preparation');if(resume)resume.onclick=()=>preparationPage(jobId);
 }
-function itemRow(e,item,index){return `<a class="publication-item" href="#read/${esc(e.id)}/${index}"><span class="article-number">${String(index+1).padStart(2,'0')}</span><span><span class="publication-item-meta">${esc(item.source)} · ${item.minutes} min · ${esc(item.origin)}</span><h3>${esc(item.title)}</h3>${item.editorial_topic?`<span class="small muted">${esc(item.editorial_topic)}</span>`:''}</span><span aria-hidden="true">↗</span></a>`;}
+function itemRow(e,item,index,path='complete'){const number=path==='featured'?e.featured.indexOf(index)+1:index+1;return `<a class="publication-item" href="${esc(readerHref({edition_id:e.id,position:index,reader_path:path}))}"><span class="article-number">${String(number).padStart(2,'0')}</span><span><span class="publication-item-meta">${esc(item.source)} · ${item.minutes} min · ${esc(item.origin)}</span><h3>${esc(item.title)}</h3>${item.editorial_topic?`<span class="small muted">${esc(item.editorial_topic)}</span>`:''}</span><span aria-hidden="true">↗</span></a>`;}
 function editionPage(e){
   const featured=e.featured||[],rest=e.items.map((_,i)=>i).filter(i=>!featured.includes(i));
   publicationShell(`<a class="quiet-link" href="#today">← Today</a><div class="publication-dateline">${esc(dateLabel(e.created_at))} · ${e.items.length} originals</div><h1>${esc(e.title)}</h1>
     ${e.introduction?`<p class="edition-introduction">${esc(e.introduction)}</p>`:''}
     <div class="edition-actions"><button class="btn primary" id="send-edition" ${readableStatus(e)?'':'disabled'}>Send this edition to Kindle</button><button class="btn" id="explain-lead">Why this lead?</button></div>
-    <section class="featured-reading"><div class="publication-section-head"><h2>${e.kind==='tonight'?'Your reading tonight':'Start here'}</h2><span class="micro-label">Approximately ${e.featured_minutes} min</span></div>${featured.map(i=>itemRow(e,e.items[i],i)).join('')}<div class="edition-end"><span>◆</span><p>End of ${e.kind==='tonight'?'tonight’s edition':'the featured reading'}.</p><p class="small">You can stop here.</p></div></section>
+    <section class="featured-reading"><div class="publication-section-head"><h2>${e.kind==='tonight'?'Your reading tonight':'Start here'}</h2><span class="micro-label">Approximately ${e.featured_minutes} min</span></div>${featured.map(i=>itemRow(e,e.items[i],i,'featured')).join('')}<div class="edition-end"><span>◆</span><p>End of ${e.kind==='tonight'?'tonight’s edition':'the featured reading'}.</p><p class="small">You can stop here.</p></div></section>
     ${rest.length?`<details class="further-reading"><summary>Further reading · ${rest.length} originals · ${e.minutes-e.featured_minutes} min</summary><p class="small">The rest of your complete edition. These subscribed originals remain yours to read; there is no inbox to clear.</p>${rest.map(i=>itemRow(e,e.items[i],i)).join('')}<div class="edition-end">End of the complete edition.</div></details>`:''}
     ${e.issues?.length?`<details class="edition-diagnostics"><summary>Preparation notes (${e.issues.length})</summary>${e.issues.map(s=>`<p class="small">${esc(s)}</p>`).join('')}</details>`:''}
     ${e.editorial?.organization?.status==='fallback'||e.editorial?.organization?.status==='skipped'?'<p class="notice">The AI editor was unavailable during composition. All eligible originals are retained in a deterministic order.</p>':''}`);
   document.querySelector('#send-edition').onclick=()=>sendEdition(e);
-  document.querySelector('#explain-lead').onclick=()=>{currentReading={edition_id:e.id};location.hash='editor';sessionStorage.setItem('longFormEditorQuestion','Why did you put this article first?');};
+  document.querySelector('#explain-lead').onclick=()=>{currentReading={edition_id:e.id};rememberReading();location.hash='editor';sessionStorage.setItem('longFormEditorQuestion','Why did you put this article first?');};
 }
 async function readPage(context,epoch){
   const r=await api('/reader/article',{method:'POST',body:context});if(epoch!==publicationEpoch)return;
   currentReading={...context,article_key:r.article_key,paragraph:r.reading.paragraph||0,progress:r.reading.progress||0,title:r.article.title,saved:r.reading.saved};
   const cached=JSON.parse(localStorage.getItem(localReadingKey(r.article_key))||'null');if(cached&&cached.updated_at>Date.parse(r.reading.updated_at||0)){currentReading.progress=cached.progress;currentReading.paragraph=cached.paragraph;}
   const e=context.edition_id?editionById(context.edition_id):null;
+  const path=context.reader_path==='featured'&&e?e.featured:e?.items.map((_,i)=>i)||[],at=path.indexOf(context.position);
+  rememberReading();
   publicationShell(`<div class="reader-toolbar"><a class="quiet-link" href="${e?'#edition/'+esc(e.id):'#explore'}">← ${e?'Edition':'Explore'}</a><button class="btn" id="save-reading">${currentReading.saved?'Saved':'Save'}</button></div><div class="publication-item-meta">${esc(r.article.author||r.article.source)} · ${esc(r.article.source)} · ${esc(r.article.origin||'Original article')}</div><h1 class="reader-title">${esc(r.article.title)}</h1>
     ${r.article.warnings?.length?`<details><summary>Article preparation notes</summary>${r.article.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}</details>`:''}
     <iframe class="publication-reader" id="original-reader" sandbox="allow-same-origin" title="${esc(r.article.title)}" referrerpolicy="no-referrer"></iframe>
     <div class="reader-bottom"><button class="btn primary" id="discuss-reading">Discuss with your editor</button><a class="btn" href="${esc(safeHref(r.article.canonical_url||r.article.url))}" target="_blank" rel="noopener noreferrer">Original source ↗</a></div>
-    ${e?`<div class="reader-pagination">${context.position>0?`<a class="btn" href="#read/${esc(e.id)}/${context.position-1}">← Previous</a>`:'<span></span>'}${context.position<e.items.length-1?`<a class="btn" href="#read/${esc(e.id)}/${context.position+1}">Next original →</a>`:`<a class="btn" href="#edition/${esc(e.id)}">End of edition ◆</a>`}</div>`:''}`);
+    ${e?`<div class="reader-pagination">${at>0?`<a class="btn" href="${esc(readerHref({...context,position:path[at-1]}))}">← Previous</a>`:'<span></span>'}${at>=0&&at<path.length-1?`<a class="btn" href="${esc(readerHref({...context,position:path[at+1]}))}">Next original →</a>`:`<a class="btn" href="#edition/${esc(e.id)}">End of ${context.reader_path==='featured'&&e.kind==='daily'?'featured reading':'edition'} ◆</a>`}</div>`:''}`);
   readerFrame=document.querySelector('#original-reader');
   // Article HTML is sanitized by the extraction pipeline. No scripts or active
   // permissions are granted. Data images are the frozen publication bytes.
@@ -92,6 +98,7 @@ function persistReading(){
   currentReading.progress=Math.min(1,Math.max(0,y/max));
   const ps=[...doc.querySelectorAll('p,h1,h2,h3,li,blockquote,pre')];const visible=ps.findIndex(p=>p.getBoundingClientRect().bottom>10);currentReading.paragraph=Math.max(0,visible);
   localStorage.setItem(localReadingKey(currentReading.article_key),JSON.stringify({progress:currentReading.progress,paragraph:currentReading.paragraph,updated_at:Date.now()}));
+  rememberReading();
   void api('/reader/state',{method:'PATCH',body:{...currentReading,progress:currentReading.progress,paragraph:currentReading.paragraph}}).catch(()=>{});
 }
 function explorePage(){
@@ -115,7 +122,7 @@ async function editorPage(epoch){
   publicationShell('<h1>Your editor</h1><p role="status">Opening your conversation…</p>','editor');
   const h=await api('/editor/history');if(epoch!==publicationEpoch)return;
   publicationShell(`<div class="editor-page-head"><span class="micro-label">The same editor, across your reading</span><h1>Your editor</h1><button class="btn" id="editor-preferences">Editorial brief & preferences</button></div>
-    ${currentReading?.title?`<div class="reading-context"><span class="micro-label">Reading context</span><p>${esc(currentReading.title)}</p><a class="btn" href="${currentReading.edition_id?'#read/'+esc(currentReading.edition_id)+'/'+currentReading.position:'#raw/'+esc(currentReading.article_id)}">Return to reading →</a></div>`:currentReading?.edition_id?'<p class="small">Discussing the edition you just opened.</p>':'<p>Steer your reading, ask about past editions, or find a deliberate detour.</p>'}
+    ${currentReading?.title?`<div class="reading-context"><span class="micro-label">Reading context</span><p>${esc(currentReading.title)}</p><a class="btn" href="${esc(readerHref(currentReading))}">Return to reading →</a></div>`:currentReading?.edition_id?'<p class="small">Discussing the edition you just opened.</p>':'<p>Steer your reading, ask about past editions, or find a deliberate detour.</p>'}
     <div id="editor-messages" aria-live="polite">${h.messages.map(messageHtml).join('')}</div><form class="editor-conversation-form" id="editor-conversation"><label for="editor-question">Talk with your editor</label><textarea class="input" id="editor-question" rows="3" maxlength="4000" placeholder="I have about 35 minutes tonight…" required></textarea><button class="btn primary" id="ask-editor" ${editorBusy?'disabled':''}>Ask your editor</button><p class="small muted">Conversation steering is temporary. Saving preferences requires your confirmation.</p></form>`,'editor');
   document.querySelector('#editor-preferences').onclick=editorModal;
   wireEditorMessages(h.messages);
@@ -132,7 +139,7 @@ function wireEditorMessages(messages){
 }
 async function startNight(request,minutes){
   nightRequest??=crypto.randomUUID();publicationShell('<span class="micro-label">Tonight’s Reading</span><h1>Finding a deliberate detour.</h1><p role="status">Your editor is checking original articles, recent editions, and your reading brief. Nothing is sent automatically.</p>');
-  try{const r=await api('/publication/compose',{method:'POST',timeout:110000,body:{request,minutes,request_key:nightRequest}});await preparationPage(r.job.id);}
+  try{const r=await api('/publication/compose',{method:'POST',timeout:140000,body:{request,minutes,request_key:nightRequest}});await preparationPage(r.job.id);}
   catch(err){publicationShell(`<h1>Tonight’s Reading</h1><p role="alert">${esc(err.message)}</p><button class="btn" id="retry-night">Try again</button><a class="btn" href="#today">Today</a>`);document.querySelector('#retry-night').onclick=()=>startNight(request,minutes);}
 }
 async function sendEdition(e){

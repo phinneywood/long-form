@@ -73,12 +73,14 @@ export async function editorReply(context: any, options: { apiKey?: string; fetc
   const key = options.apiKey ?? Deno.env.get("OPENAI_API_KEY") ?? "";
   if (!key) return { answer: "Your editor is temporarily unavailable. Your editions, original articles and chronological feed are still available.", action: "answer", guidance: null, minutes: null, citations: [], unavailable: true };
   try {
+    const allowed = new Set<string>((context.evidence || []).map((e: any) => e.id));
+    const schema={...editorSchema,properties:{...editorSchema.properties,citations:{type:"array",maxItems:allowed.size?10:0,items:allowed.size?{type:"string",enum:[...allowed]}:{type:"string"}}}};
     const deadline=Date.now()+40_000,signal=AbortSignal.timeout(40_000);
     const response = await modelResponse(()=>(options.fetchImpl || fetch)("https://api.openai.com/v1/responses", {
       method: "POST", signal, headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model: "gpt-6-luna", store: false, reasoning: { effort: "low" }, max_output_tokens: 1800,
         input: [{ role: "system", content: EDITOR_CONTRACT }, { role: "user", content: JSON.stringify(context) }],
-        text: { format: { type: "json_schema", name: "long_form_editor_reply", strict: true, schema: editorSchema } },
+        text: { format: { type: "json_schema", name: "long_form_editor_reply", strict: true, schema } },
       }),
     }),{deadline});
     if (!response.ok) throw new Error(`Editor unavailable (${response.status}).`);
@@ -87,7 +89,6 @@ export async function editorReply(context: any, options: { apiKey?: string; fetc
     const result = JSON.parse(text || "{}");
     if(preferenceOnly(context.question)&&result.guidance)result.action="steer";
     if (typeof result.answer !== "string" || !["answer", "steer", "compose"].includes(result.action) || !Array.isArray(result.citations)) throw new Error("Invalid editor response.");
-    const allowed = new Set((context.evidence || []).map((e: any) => e.id));
     if (result.citations.some((id: any) => !allowed.has(id))) throw new Error("Editor cited unavailable evidence.");
     return { ...result, guidance: typeof result.guidance === "string" ? result.guidance.slice(0, 3000) : null,
       minutes: Math.max(10, Math.min(120, Number(result.minutes) || 35)), unavailable: false };

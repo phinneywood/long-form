@@ -1,5 +1,5 @@
 import {featuredPath,publicationItems,summarizeEdition,editorReply,editorExchanges,preferenceOnly,paragraphs} from "../functions/_shared/publication.ts";
-import {validateNightPlan,nightBundles,assessNightBundle,canonicalKey} from "../functions/_shared/night-edition.ts";
+import {validateNightPlan,nightBundles,assessNightBundle,canonicalKey,composeNight} from "../functions/_shared/night-edition.ts";
 function assert(v:unknown,m="Assertion failed"):asserts v{if(!v)throw new Error(m)}
 const original="This is a substantial original article about a carefully considered historical question. ".repeat(90);
 const groups=Array.from({length:4},(_,s)=>({section:{name:`Topic ${s}`},items:Array.from({length:9},(_,i)=>({title:`Original ${s}:${i}`,body:`<p>${original}</p>`,source:`Source ${s}`,feed_id:`feed-${s}`,url:`https://example.com/${s}/${i}`,canonical_url:`https://example.com/${s}/${i}`,assets:[],warnings:[],editorial_decision_reason:`Article ${s}:${i} supplies historical evidence for topic ${s}.`}))}));
@@ -20,6 +20,7 @@ Deno.test('editor receives actual paragraphs and never acquires arbitrary tools'
  const ps=paragraphs('<p>First original argument.</p><p>Second original argument.</p>');assert(ps.length===2&&ps[1]==='Second original argument.');
  let sent:any;await editorReply({reading:{visible_paragraphs:ps},evidence:[{id:'reading'}]},{apiKey:'test',fetchImpl:async(_u,i)=>{sent=JSON.parse(String(i?.body));return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify({answer:'The argument is grounded.',action:'answer',guidance:null,minutes:null,citations:['reading']})}]}]})}});
  assert(!sent.tools);assert(sent.input[1].content.includes('Second original argument.'));assert(sent.input[0].content.includes('confirmation action'));
+ assert(sent.text.format.schema.properties.citations.items.enum.join(',')==='reading','Native citations are constrained to actual retrieved evidence');
 });
 Deno.test('reading conversation cannot replay another original or historical full-text citations',async()=>{
  const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-stale-reading-answer.json',import.meta.url))),url='https://example.com/current';
@@ -52,4 +53,12 @@ Deno.test('model chooses an explicit feasible bundle without substituting or inv
  const selected=assessNightBundle({bundle:0,assessments:{0:{...assessment(0),rank:2},2:{...assessment(2),rank:3},4:{...assessment(4),rank:1}}},bundles);
  assert(selected.articles.map((a:any)=>a.index).join(',')==='4,0,2');
  assert(assessNightBundle({bundle:0,assessments:{0:{...assessment(99),rank:1},2:{...assessment(2),rank:2},4:{...assessment(4),rank:3}}},bundles).articles[0].index===0,'Assessment data cannot replace an original ID');
+});
+
+Deno.test('night discovery bounds native search and fails without extractable originals',async()=>{
+ let sent:any,failed=false;
+ try{await composeNight({request:'35 minutes of surprising original reading',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{sent=JSON.parse(i.body);return Response.json({output:[{content:[{type:'output_text',text:'{"articles":[]}'}]}]});}});}catch(e){failed=e instanceof Error&&e.message.includes('No suitable original articles');}
+ assert(failed);assert(sent.max_tool_calls===3&&sent.tools[0].search_context_size==='low');
+ assert(sent.input[0].content.includes('Do not open pages'),'Extract and assess originals through the existing backend');
+ assert(sent.store===false);
 });
