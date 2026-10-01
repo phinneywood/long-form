@@ -54,7 +54,9 @@ The proposed advantage is the combined default: a recurring editorial mandate, f
 
 ## Release boundaries
 
-Final deterministic validation: **115 Deno and 74 Node tests**, all four edge entrypoints type checked, green Chromium/WebKit CI with publication screenshot journeys at 320/390/1440 pixels and retained onboarding/settings journeys. The final stricter-assessment exact test submission again verified identical frozen attachments and canonical original order, actual provider acceptance, idempotent retry and honest terminal partial notes.
+Final deterministic validation: **116 Deno and 74 Node tests**, all four edge entrypoints type checked, green Chromium/WebKit CI with publication screenshot journeys at 320/390/1440 pixels and retained onboarding/settings journeys. The final stricter-assessment exact test submission again verified identical frozen attachments and canonical original order, actual provider acceptance, idempotent retry and honest terminal partial notes.
+
+Reader lookups project only the requested original, and reading-state writes verify a minimal owned article reference. A live before/after SHA-256 comparison retained exact original text, numbered paragraphs and partial saved/progress state; negative positions were rejected. Complete edition bodies/media are not reloaded on each scroll update.
 
 The migrations and API capabilities are additive and keep existing opaque-session authentication, backend-only RLS and MCP OAuth scopes. No agent SQL endpoint, new scheduler, plugin-publication dependency or security-protection bypass was added. The existing deterministic Kindle pipeline remains the output path. Frozen original text persists for reader/history independently of delivery-outbox cleanup; partial delivery notes explicitly report media omissions.
 

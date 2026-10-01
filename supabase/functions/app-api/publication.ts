@@ -7,20 +7,23 @@ import { composeNight } from "../_shared/night-edition.ts";
 
 const uuid=(v:unknown)=>/^[0-9a-f-]{36}$/i.test(String(v||""));
 const key=(v:unknown)=>typeof v==="string"&&v.length>=8&&v.length<=120;
-async function ownedEdition(userId:string,id:string,full=false) {
-  const r=await admin.from("publication_editions").select(full?"*":"id,user_id,job_id,kind,title,target_minutes,created_at,manifest:summary").eq("user_id",userId).eq("id",id).maybeSingle();
+async function ownedEdition(userId:string,id:string) {
+  const r=await admin.from("publication_editions").select("id,user_id,job_id,kind,title,target_minutes,created_at,manifest:summary").eq("user_id",userId).eq("id",id).maybeSingle();
   if(r.error)throw r.error;if(!r.data)throw Object.assign(new Error("Edition not found."),{status:404});return r.data as any;
 }
-async function getArticle(userId:string,body:any) {
+async function getArticle(userId:string,body:any,metadataOnly=false) {
   if(uuid(body.edition_id)&&Number.isInteger(body.position)) {
-    const edition=await ownedEdition(userId,body.edition_id,true),article=edition.manifest.items[body.position];
-    if(!article)throw Object.assign(new Error("Article not found."),{status:404});
-    return {article,key:`${edition.id}:${body.position}`,edition};
+    if(body.position<0)throw Object.assign(new Error("Article not found."),{status:404});
+    // Fetch only this original. Progress updates need only its presence, not
+    // every body/media blob in a large complete publication.
+    const r=await admin.from("publication_editions").select(`id,article:manifest->items->${body.position}${metadataOnly?'->url':''}`).eq("user_id",userId).eq("id",body.edition_id).maybeSingle();
+    if(r.error)throw r.error;const edition=r.data as any;if(!edition?.article)throw Object.assign(new Error("Article not found."),{status:404});
+    return {article:metadataOnly?{}:edition.article,key:`${edition.id}:${body.position}`,edition};
   }
   if(uuid(body.article_id)) {
-    const r=await admin.from("reader_articles").select("*").eq("id",body.article_id).eq("user_id",userId).maybeSingle();
+    const r=await admin.from("reader_articles").select(metadataOnly?"id":"*").eq("id",body.article_id).eq("user_id",userId).maybeSingle();
     if(r.error)throw r.error;if(!r.data)throw Object.assign(new Error("Article not found."),{status:404});
-    return {article:r.data.article,key:`raw:${r.data.id}`,article_id:r.data.id};
+    return {article:metadataOnly?{}:r.data.article,key:`raw:${r.data.id}`,article_id:r.data.id};
   }
   throw Object.assign(new Error("Choose an article first."),{status:400});
 }
@@ -78,7 +81,7 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     return json({article:{...a.article,assets:[]},article_key:a.key,reading:r.data||{progress:0,paragraph:0,saved:false},paragraphs:paragraphs(a.article.body)});
   }
   if(route==="/reader/state"&&req.method==="PATCH") {
-    const a=await getArticle(uid,body),patch:any={user_id:uid,article_key:a.key,updated_at:new Date().toISOString()};
+    const a=await getArticle(uid,body,true),patch:any={user_id:uid,article_key:a.key,updated_at:new Date().toISOString()};
     if(body.progress!==undefined){if(!Number.isFinite(body.progress)||body.progress<0||body.progress>1)return json({error:"Invalid reading position."},400);patch.progress=body.progress;patch.paragraph=Math.max(0,Math.trunc(Number(body.paragraph)||0));}
     if(typeof body.saved==="boolean")patch.saved=body.saved;
     const r=await admin.rpc("update_reading_state",{p_user_id:uid,p_article_key:a.key,p_progress:patch.progress??null,p_paragraph:patch.paragraph??null,p_saved:patch.saved??null});if(r.error)throw r.error;return json({ok:true});
