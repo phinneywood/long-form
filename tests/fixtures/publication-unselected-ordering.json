@@ -1,0 +1,31 @@
+{
+  "failure": "Selected originals retained candidate-pool ordering reasons for a different selection.",
+  "selected": [
+    {
+      "index": 0,
+      "title": "Was There Treasure Buried Under Lyon?",
+      "reason": "A strong underground-history detour, but not selected for this edition."
+    },
+    {
+      "index": 1,
+      "title": "Can animals shape their own lives? Or the course of history? | Aeon Essays",
+      "reason": "Not selected; its broad reflection on animal lives and agency is an interesting fit, but the chosen bundle\u2019s shorter, place-centered pieces make a more varied route."
+    },
+    {
+      "index": 2,
+      "title": "In Sleepy Hollow, Life Imitates Legend",
+      "reason": "Welcoming lead: the playful story of a fictional village becoming a real place opens the edition with an unexpected blend of literature and local history."
+    },
+    {
+      "index": 3,
+      "title": "Submerged Italian Village Briefly Resurfaces After 70 Years Underwater",
+      "reason": "Placed second, it contrasts with Sleepy Hollow: instead of fiction reshaping a town\u2019s identity, a real town disappeared beneath a lake and briefly reemerged."
+    },
+    {
+      "index": 4,
+      "title": "What Lies Beneath the Gravestone of a Fictional It Girl?",
+      "reason": "Placed third, this shifts from submerged physical traces to a fictional character whose grave drew real visitors, extending the edition\u2019s play between story and place."
+    }
+  ],
+  "expected": "Sequence only the exact selected set and reject unselected rationale."
+}

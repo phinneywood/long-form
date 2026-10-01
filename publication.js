@@ -61,6 +61,7 @@ async function preparationPage(jobId){
 }
 function itemRow(e,item,index,path='complete'){const number=path==='featured'?e.featured.indexOf(index)+1:index+1;return `<a class="publication-item" href="${esc(readerHref({edition_id:e.id,position:index,reader_path:path}))}"><span class="article-number">${String(number).padStart(2,'0')}</span><span><span class="publication-item-meta">${esc(item.source)} · ${item.minutes} min · ${esc(item.origin)}</span><h3>${esc(item.title)}</h3>${item.editorial_topic?`<span class="small muted">${esc(item.editorial_topic)}</span>`:''}</span><span aria-hidden="true">↗</span></a>`;}
 function editionPage(e){
+  currentReading={edition_id:e.id,edition_title:e.title};rememberReading();
   const featured=e.featured||[],rest=e.items.map((_,i)=>i).filter(i=>!featured.includes(i));
   publicationShell(`<a class="quiet-link" href="#today">← Today</a><div class="publication-dateline">${esc(dateLabel(e.created_at))} · ${e.items.length} originals</div><h1>${esc(e.title)}</h1>
     ${e.introduction?`<p class="edition-introduction">${esc(e.introduction)}</p>`:''}
@@ -117,25 +118,29 @@ async function rawFeedPage(){
 }
 function messageHtml(m){const r=m.response||{};return `<article class="editor-exchange"><p class="editor-question">${esc(m.question)}</p><div class="editor-answer ${r.unavailable?'notice':''}">${esc(r.answer).replace(/\n/g,'<br>')}</div>${r.citations?.length?`<div class="editor-evidence">${r.citations.map(c=>`<a href="${c.edition_id?'#read/'+esc(c.edition_id)+'/'+c.position:esc(safeHref(c.url))}" ${c.edition_id?'':'target="_blank" rel="noopener noreferrer"'}>${esc(c.title||'Original passage')}${c.delivered_at?' · submitted '+esc(dateLabel(c.delivered_at)):''}</a>`).join('')}</div>`:''}
     ${m.proposed_guidance?`<div class="preference-proposal"><p class="small">Temporary conversation guidance: ${esc(m.proposed_guidance)}</p>${m.confirmed_at?'<p class="micro-label">Saved for future nighttime editions</p>':`<button class="btn confirm-guidance" data-id="${esc(m.id)}">Save as my nighttime preferences</button>`}</div>`:''}
-    ${r.compose_request?`<button class="btn primary compose-request" data-request="${esc(m.id)}">Compose this reading edition</button>`:''}</article>`;}
+    ${r.compose_request?`<button class="btn primary compose-request" data-request="${esc(m.id)}">Compose this reading edition</button>`:''}${r.send_request?`<button class="btn primary review-send-request" data-request="${esc(m.id)}">Review exact edition for Kindle</button>`:''}</article>`;}
 async function editorPage(epoch){
   publicationShell('<h1>Your editor</h1><p role="status">Opening your conversation…</p>','editor');
   const h=await api('/editor/history');if(epoch!==publicationEpoch)return;
   publicationShell(`<div class="editor-page-head"><span class="micro-label">The same editor, across your reading</span><h1>Your editor</h1><button class="btn" id="editor-preferences">Editorial brief & preferences</button></div>
-    ${currentReading?.title?`<div class="reading-context"><span class="micro-label">Reading context</span><p>${esc(currentReading.title)}</p><a class="btn" href="${esc(readerHref(currentReading))}">Return to reading →</a></div>`:currentReading?.edition_id?'<p class="small">Discussing the edition you just opened.</p>':'<p>Steer your reading, ask about past editions, or find a deliberate detour.</p>'}
+    ${currentReading?.title?`<div class="reading-context"><span class="micro-label">Reading context</span><p>${esc(currentReading.title)}</p><a class="btn" href="${esc(readerHref(currentReading))}">Return to reading →</a></div>`:currentReading?.edition_id?`<p class="small">Discussing ${esc(currentReading.edition_title||'the edition you just opened')}.</p><a class="quiet-link" href="#edition/${esc(currentReading.edition_id)}">Return to edition →</a>`:'<p>Steer your reading, ask about past editions, or find a deliberate detour.</p>'}
     <div id="editor-messages" aria-live="polite">${h.messages.map(messageHtml).join('')}</div><form class="editor-conversation-form" id="editor-conversation"><label for="editor-question">Talk with your editor</label><textarea class="input" id="editor-question" rows="3" maxlength="4000" placeholder="I have about 35 minutes tonight…" required></textarea><button class="btn primary" id="ask-editor" ${editorBusy?'disabled':''}>Ask your editor</button><p class="small muted">Conversation steering is temporary. Saving preferences requires your confirmation.</p></form>`,'editor');
   document.querySelector('#editor-preferences').onclick=editorModal;
   wireEditorMessages(h.messages);
   const q=sessionStorage.getItem('longFormEditorQuestion');if(q){document.querySelector('#editor-question').value=q;sessionStorage.removeItem('longFormEditorQuestion');}
   document.querySelector('#editor-conversation').onsubmit=async ev=>{
     ev.preventDefault();if(editorBusy)return;editorBusy=true;const field=document.querySelector('#editor-question'),question=field.value;const button=document.querySelector('#ask-editor');button.disabled=true;button.textContent='Considering your reading…';
-    try{const r=await api('/editor/message',{method:'POST',body:{question,request_key:crypto.randomUUID(),...currentReading}});if(epoch!==publicationEpoch)return;document.querySelector('#editor-messages').insertAdjacentHTML('beforeend',messageHtml(r.message));field.value='';wireEditorMessages([...h.messages,r.message]);document.querySelector('#editor-messages').lastElementChild.scrollIntoView({block:'start',behavior:'smooth'});if(r.message.response?.compose_request){const c=r.message.response.compose_request;await startNight(c.request,c.minutes);}}
+    try{const r=await api('/editor/message',{method:'POST',body:{question,request_key:crypto.randomUUID(),...currentReading}});if(epoch!==publicationEpoch)return;document.querySelector('#editor-messages').insertAdjacentHTML('beforeend',messageHtml(r.message));field.value='';wireEditorMessages([...h.messages,r.message]);document.querySelector('#editor-messages').lastElementChild.scrollIntoView({block:'start',behavior:'smooth'});if(r.message.response?.compose_request){const c=r.message.response.compose_request;await startNight(c.request,c.minutes);}else if(r.message.response?.send_request){await reviewEditorSend(r.message);}}
     catch(err){toast(err.message);}finally{editorBusy=false;if(button.isConnected){button.disabled=false;button.textContent='Ask your editor';}}
   };
 }
 function wireEditorMessages(messages){
   document.querySelectorAll('.confirm-guidance').forEach(b=>b.onclick=async()=>{b.disabled=true;try{await api('/editor/confirm',{method:'POST',body:{message_id:b.dataset.id}});b.textContent='Saved for future nighttime editions';}catch(err){toast(err.message);b.disabled=false;}});
   document.querySelectorAll('.compose-request').forEach(b=>b.onclick=()=>{const m=messages.find(m=>m.id===b.dataset.request);if(m)void startNight(m.response.compose_request.request,m.response.compose_request.minutes);});
+  document.querySelectorAll('.review-send-request').forEach(b=>b.onclick=()=>{const m=messages.find(m=>m.id===b.dataset.request);if(m)void reviewEditorSend(m);});
+}
+async function reviewEditorSend(message){
+  try{if(!editionById(message.response.send_request.edition_id))await loadEditions();const e=editionById(message.response.send_request.edition_id);if(!e)throw new Error('Open the edition before sending it.');await sendEdition(e);}catch(err){toast(err.message);}
 }
 async function startNight(request,minutes){
   nightRequest??=crypto.randomUUID();publicationShell('<span class="micro-label">Tonight’s Reading</span><h1>Finding a deliberate detour.</h1><p role="status">Your editor is checking original articles, recent editions, and your reading brief. Nothing is sent automatically.</p>');

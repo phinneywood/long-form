@@ -79,6 +79,12 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
     }
     assert(url.hostname === "database.example.invalid", "Unexpected network call " + url.hostname);
     if (url.pathname.includes("/rpc/kick_digest_worker")) return Response.json(1);
+    if (url.pathname.includes('/rpc/freeze_delivery_payload')) {
+      const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);
+      if(failOutboxInsert){failOutboxInsert=false;return Response.json({message:'Outbox unavailable after manifest freeze'},{status:500});}
+      if(!outbox)outbox={job_id:job.id,payload:body.p_payload,first_send_at:null,provider_email_id:null};
+      return Response.json({first_send_at:outbox.first_send_at,provider_email_id:outbox.provider_email_id});
+    }
     const table = url.pathname.split('/').at(-1);
     const body = req.method === "GET" ? null : await req.json();
     let rows: any[] = [];

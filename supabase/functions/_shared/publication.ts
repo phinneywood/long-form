@@ -62,6 +62,9 @@ export function preferenceOnly(question:string){
  return /\b(i want|i would like|i’d like|i prefer|please|give me)\b[\s\S]*\b(less|more|prefer|avoid)\b/i.test(question)
  && !/\b(find|compose|create|assemble|recommend|reading list|what should i read)\b/i.test(question);
 }
+export function explicitEditionSend(question:string){
+ return /^(?:please\s+)?send\s+(?:this|the\s+(?:current|exact))\s*(?:edition|publication|reading)?\s+to\s+(?:my\s+)?kindle[.!]?$/i.test(question.trim());
+}
 const editorSchema = {
   type: "object", properties: {
     answer: { type: "string" }, action: { type: "string", enum: ["answer", "steer", "compose"] },

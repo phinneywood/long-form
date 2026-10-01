@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { fetchPublicText } from "../_shared/network.ts";
-import { XMLParser } from "npm:fast-xml-parser@5.11.1";
+import { feedCandidates } from "../_shared/feed-candidates.ts";
 
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -169,44 +169,32 @@ function htmlFeedLinks(html:string,base:string){
   }
   return out;
 }
-async function verifyFeedCandidate(candidate:{url:string,title?:string,method?:string}){
-  if(!validUrl(candidate.url))return null;
-  try{const x=await safeFetch(candidate.url,1_500_000);if(!looksLikeFeed(x))return null;return{url:normalizeUrl(candidate.url),title:(candidate.title||feedTitle(x)||new URL(candidate.url).hostname).slice(0,120),method:candidate.method||"discovered"}}catch{return null}
-}
-export async function discoverFeeds(input:string){
-  const url=normalizeUrl(input);if(!validUrl(url))throw new Error("Enter a valid website or RSS/Atom address.");
-  let html="";let originalError="";
-  try{html=await safeFetch(url,1_500_000)}catch(e){originalError=e instanceof Error?e.message:String(e)}
-  if(html&&looksLikeFeed(html))return[{url,title:feedTitle(html)||new URL(url).hostname,method:"direct"}];
+async function verifyFee…16200 tokens truncated…ublication_editions'))rows=[{id:eid,user_id:uid,job_id:null,kind:'daily',title:'Long Form',target_minutes:30,created_at:'2026-10-01',manifest:{items:[{title:'Actual original',source:'Publisher',url:'https://example.com/a',body:'<p>Actual original author’s text.</p>',minutes:1,position:0,origin:'subscribed',reason:'Recorded lead'}],featured:[0]}}];
+ const singular=r.headers.get('accept')?.includes('object');return Response.json(singular?rows[0]||null:rows);}) as typeof fetch;
+ try{
+ const user={id:uid,email:'test@example.com'};
+ const list=await publicationRoute(new Request('https://app/publication/editions'),'/publication/editions',user);const data=await list!.json();assert(!JSON.stringify(data).includes('author’s text'),'list must not leak/load original bodies');assert(calls[0].searchParams.get('select')?.includes('manifest:summary'),'metadata projection');
+ const req=new Request('https://app/reader/article',{method:'POST',body:JSON.stringify({edition_id:eid,position:0,user_id:'another-user'})});const read=await publicationRoute(req,'/reader/article',user);assert((await read!.json()).article.body.includes('Actual original'),'reader must use actual stored text');
+ }finally{globalThis.fetch=original;}
+});
+Deno.test('job status uses bounded tenant capability rather than full frozen preparation manifests',async()=>{
+ const original=globalThis.fetch;globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{const r=new Request(input,init),u=new URL(r.url),b=await r.json();assert(u.pathname.endsWith('/rpc/publication_job_status'));assert(b.p_user_id===uid);return Response.json({job:{id:eid,status:'failed',error:'Extraction failed',result:{issues:['An original could not be prepared']}},edition_id:null});}) as typeof fetch;
+ try{const r=await publicationRoute(new Request('https://app/publication/job?id='+eid),'/publication/job',{id:uid,email:'test@example.com'}),data=await r!.json();assert(data.job.status==='failed'&&data.job.error==='Extraction failed');}finally{globalThis.fetch=original;}
+});
 
-  const found:{url:string,title:string,method:string}[]=[];
-  if(html){
-    for(const c of htmlFeedLinks(html,url).slice(0,8)){const v=await verifyFeedCandidate(c);if(v&&!found.some(x=>x.url===v.url))found.push(v)}
+Deno.test('explicit editor send reviews the owned edition without a model call or delivery side effect',async()=>{
+ const original=globalThis.fetch;let stored:any=null,lookups=0;
+ globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+  const r=new Request(input,init),u=new URL(r.url);assert(u.hostname==='publication-db.example.invalid','No model/provider calls');
+  if(u.pathname.endsWith('/editor_messages')){
+   if(r.method==='GET'){assert(u.searchParams.get('user_id')==='eq.'+uid);return Response.json(null);}
+   stored=await r.json();assert(stored.user_id===uid);return Response.json({id:'message',...stored});
   }
-  if(!found.length){
-    const base=new URL(url),paths=["/feed","/feed/","/rss","/rss.xml","/feed.xml","/atom.xml","/index.xml"];
-    for(const p of paths){const v=await verifyFeedCandidate({url:new URL(p,base.origin).toString(),method:"common-path"});if(v&&!found.some(x=>x.url===v.url))found.push(v);if(found.length>=4)break}
-  }
-  if(!found.length){
-    try{
-      const raw=await safeFetch("https://origin.feedsearch.dev/api/v1/search?info=true&favicon=false&opml=false&url="+encodeURIComponent(url),1_000_000);
-      {
-        const rows=JSON.parse(raw);
-        for(const row of (Array.isArray(rows)?rows:[]).slice(0,8)){
-          const v=await verifyFeedCandidate({url:String(row.url||""),title:String(row.title||row.site_name||""),method:"feedsearch"});
-          if(v&&!found.some(x=>x.url===v.url))found.push(v);
-          if(found.length>=6)break;
-        }
-      }
-    }catch{}
-  }
-  if(found.length)return found;
-  if(originalError)throw new Error(originalError);
-  throw new Error("Long Form couldn't find an RSS or Atom feed for this site. Try a direct feed URL or search with Feedsearch.");
-}
-export async function probe(url:string){const feeds=await discoverFeeds(url);return feeds[0]}
-function arr(x:any){return x==null?[]:Array.isArray(x)?x:[x]}
-function text(x:any):string{if(x==null)return"";if(typeof x==="string"||typeof x==="number")return String(x);if(typeof x==="object"){if("__cdata"in x)return text(x.__cdata);if("#text"in x)return text(x["#text"])}return""}
-function link(x:any):string{if(typeof x==="string")return x;for(const v of arr(x)){if(typeof v==="string")return v;if(v&&typeof v==="object"&&v["@_href"])return String(v["@_href"])}return""}
-export async function preview(feed:any,limit=10){try{const raw=await safeFetch(feed.url);if(!looksLikeFeed(raw))throw new Error("This source did not return RSS or Atom.");const p=new XMLParser({ignoreAttributes:false,attributeNamePrefix:"@_",textNodeName:"#text",cdataPropName:"__cdata"}),d:any=p.parse(raw);let es:any[]=[];if(d?.rss?.channel?.item)es=arr(d.rss.channel.item);else if(d?.feed?.entry)es=arr(d.feed.entry);else if(d?.["rdf:RDF"]?.item)es=arr(d["rdf:RDF"].item);const items=es.slice(0,Math.max(1,Math.min(200,limit))).map(e=>{const raw=text(e.pubDate||e.published||e.updated||e["dc:date"]),dt=raw?new Date(raw):null;return{title:text(e.title).replace(/<[^>]+>/g,"").trim()||"Untitled",url:link(e.link)||text(e.guid||e.id),published_at:dt&&!isNaN(+dt)?dt.toISOString():null,source:feed.name}}).filter(x=>x.url);const now=new Date().toISOString();await admin.from("feeds").update({last_fetch_at:now,last_success_at:now,last_error:null,consecutive_failures:0}).eq("id",feed.id);return{feed_id:feed.id,items}}catch(e){const m=e instanceof Error?e.message:String(e),failures=Number(feed.consecutive_failures||0)+1;await admin.from("feeds").update({last_fetch_at:new Date().toISOString(),last_error:m.slice(0,500),consecutive_failures:failures}).eq("id",feed.id);return{feed_id:feed.id,items:[],error:m}}}
-export function emailConfigured(){return Boolean(RESEND_API_KEY)}
+  assert(u.pathname.endsWith('/publication_editions'),'No delivery side effects');assert(u.searchParams.get('user_id')==='eq.'+uid&&u.searchParams.get('id')==='eq.'+eid);lookups++;
+  return Response.json({id:eid,title:'Tonight’s Reading',manifest:{items:[]}});
+ }) as typeof fetch;
+ try{
+  const r=await publicationRoute(new Request('https://app/editor/message',{method:'POST',body:JSON.stringify({question:'Send this to my Kindle.',edition_id:eid,request_key:'explicit-send-review',user_id:'another-user'})}),'/editor/message',{id:uid,email:'test@example.com'});
+  const result=await r!.json();assert(lookups===1&&result.message.response.send_request.edition_id===eid);assert(result.message.response.answer.includes('Nothing has been sent'));
+ }finally{globalThis.fetch=original;}
+});

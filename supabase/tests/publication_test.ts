@@ -1,5 +1,5 @@
-import {featuredPath,publicationItems,summarizeEdition,editorReply,editorExchanges,preferenceOnly,paragraphs} from "../functions/_shared/publication.ts";
-import {validateNightPlan,nightBundles,assessNightBundle,canonicalKey,composeNight} from "../functions/_shared/night-edition.ts";
+import {featuredPath,publicationItems,summarizeEdition,editorReply,editorExchanges,preferenceOnly,paragraphs,explicitEditionSend} from "../functions/_shared/publication.ts";
+import {validateNightPlan,nightBundles,assessNightBundle,canonicalKey,composeNight,validateNightSequence,nightCandidatePool,chooseNightBundle} from "../functions/_shared/night-edition.ts";
 function assert(v:unknown,m="Assertion failed"):asserts v{if(!v)throw new Error(m)}
 const original="This is a substantial original article about a carefully considered historical question. ".repeat(90);
 const groups=Array.from({length:4},(_,s)=>({section:{name:`Topic ${s}`},items:Array.from({length:9},(_,i)=>({title:`Original ${s}:${i}`,body:`<p>${original}</p>`,source:`Source ${s}`,feed_id:`feed-${s}`,url:`https://example.com/${s}/${i}`,canonical_url:`https://example.com/${s}/${i}`,assets:[],warnings:[],editorial_decision_reason:`Article ${s}:${i} supplies historical evidence for topic ${s}.`}))}));
@@ -57,8 +57,69 @@ Deno.test('model chooses an explicit feasible bundle without substituting or inv
 
 Deno.test('night discovery bounds native search and fails without extractable originals',async()=>{
  let sent:any,failed=false;
- try{await composeNight({request:'35 minutes of surprising original reading',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{sent=JSON.parse(i.body);return Response.json({output:[{content:[{type:'output_text',text:'{"articles":[]}'}]}]});}});}catch(e){failed=e instanceof Error&&e.message.includes('No suitable original articles');}
- assert(failed);assert(sent.max_tool_calls===3&&sent.tools[0].search_context_size==='low');
+ try{await composeNight({request:'35 minutes of surprising original reading',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{sent=JSON.parse(i.body);return Response.json({output:[{content:[{type:'output_text',text:'{"publishers":[]}'}]}]});}});}catch(e){failed=e instanceof Error&&e.message.includes('No suitable original articles');}
+ assert(failed);assert(sent.max_tool_calls===1&&sent.tools[0].search_context_size==='low');
  assert(sent.input[0].content.includes('Do not open pages'),'Extract and assess originals through the existing backend');
  assert(sent.store===false);
+});
+
+Deno.test('selected-only sequencing rejects real contradictory selection notes and duplicate ranks',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-unselected-ordering.json',import.meta.url)));
+ const chosen=fixture.selected.map((a:any)=>a.index),assessments=Object.fromEntries(fixture.selected.map((a:any,i:number)=>[String(a.index),{topic:'History',reason:a.reason,work_related:false,rank:i+1}]));
+ let rejected=false;try{validateNightSequence({assessments},chosen)}catch{rejected=true}assert(rejected);
+ for(const a of Object.values(assessments) as any[])a.reason='An actual selected original placed in this sequence.';
+ assert(validateNightSequence({assessments},chosen).map((a:any)=>a.index).join(',')===chosen.join(','));
+ (assessments as any)['1'].rank=1;rejected=false;try{validateNightSequence({assessments},chosen)}catch{rejected=true}assert(rejected);
+});
+
+Deno.test('composition sequences the exact extracted selection, never the whole candidate pool',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-neighbor-ordering.json',import.meta.url)));assert(fixture.actual_order[1].includes('Library'));
+ const originalFetch=globalThis.fetch;let chosen:number[]=[],sequenced:any[]=[],stages=0;
+ globalThis.fetch=(async(input:RequestInfo|URL)=>{
+  const id=Number(new URL(String(input)).pathname.split('/').at(-1));
+  return new Response(`<html><head><title>History original ${id}</title><meta property="og:site_name" content="Publisher ${id%5}"></head><body><article><h1>History original ${id}</h1><p>${'Substantial original history and science writing. '.repeat(300+id*10)}</p></article></body></html>`,{headers:{'content-type':'text/html'}});
+ }) as typeof fetch;
+ try{
+  const result=await composeNight({request:'35 minutes, interesting and surprising, not work',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{
+   const sent=JSON.parse(i.body),input=JSON.parse(sent.input[1].content);let output:any;
+   if(stages++===0)output={publishers:Array.from({length:5},(_,publisher)=>({domain:'8.8.8.8',urls:[`https://8.8.8.8/${publisher}`,`https://8.8.8.8/${publisher+5}`]}))};
+   else if(Object.values(sent.text.format.schema.properties.assessments.properties)[0] instanceof Object && (Object.values(sent.text.format.schema.properties.assessments.properties)[0] as any).properties.fit_score){output={assessments:Object.fromEntries(input.articles.map((a:any)=>[String(a.index),{topic:'History',work_related:false,original_article:true,fit_score:5}]))};}
+   else if(sent.text.format.schema.properties.assessments.properties[input.articles[0].index].properties.rank){sequenced=input.articles;chosen=sequenced.map(a=>a.index);assert(sequenced.length>=3&&sequenced.length<=5);output={assessments:Object.fromEntries(sequenced.map((a,i)=>[String(a.index),{rank:sequenced.length-i}]))};}
+   else{assert(input.articles.map((a:any)=>a.index).join(',')===[...chosen].reverse().join(','));assert(input.articles[0].previous===null&&input.articles.at(-1).next===null);output={introduction:'An introduction to the exact selected originals.',assessments:Object.fromEntries(input.articles.map((a:any,i:number)=>[String(a.index),{topic:`Topic ${i}`,reason:`${a.title} is followed by ${a.next||'the end'}.`,work_related:false}]))};}
+   return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify(output)}]}]});
+  }});
+  assert(stages===4);assert(result.groups.map((g:any)=>g.items[0].title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));
+ }finally{globalThis.fetch=originalFetch;}
+});
+
+Deno.test('replenishment bounds candidate planning while retaining actual length fit and diverse publishers',()=>{
+ const article=(source:string,minutes:number)=>({...groups[0].items[0],source,author:null,published_at:null,excerpt:'',article_hash:source+minutes,body:'<p>'+('word '.repeat(225*minutes))+'</p>'});
+ const short=[article('A',1),article('B',2),article('C',3),article('D',2)];assert(nightBundles(short,35).length===0);
+ const replenished=nightCandidatePool([...short,...Array.from({length:20},(_,i)=>article('Publisher '+i%5,8+i%4))],35);
+ assert(replenished.length===24&&new Set(replenished.map(a=>a.source)).size>=5);assert(nightBundles(replenished,35).length>0);
+});
+
+Deno.test('only an explicit Kindle send instruction opens exact-edition review',()=>{
+ assert(explicitEditionSend('Send this to my Kindle.'));assert(explicitEditionSend('Please send this edition to my Kindle'));
+ for(const question of ['Do not send this to my Kindle','Should I send this to my Kindle?','Have you sent anything about urbanism lately?','Send a different edition to another address'])assert(!explicitEditionSend(question));
+});
+
+Deno.test('editor assessments select a feasible original bundle without work material, page collections or low-fit filler',()=>{
+ const bundles=[{indices:[0,1,2],minutes:35,sources:3},{indices:[0,1,3],minutes:34,sources:3}];
+ const assessments=Object.fromEntries([0,1,2,3].map(i=>[i,{work_related:false,original_article:true,fit_score:i===3?5:4,topic:'Topic '+i}]));
+ assert(chooseNightBundle(assessments,bundles,35).includes(3));assessments[3].work_related=true;assert(chooseNightBundle(assessments,bundles,35).includes(2));
+ assessments[2].original_article=false;let rejected=false;try{chooseNightBundle(assessments,bundles,35)}catch{rejected=true}assert(rejected);
+ assessments[2].original_article=true;assessments[2].fit_score=1;rejected=false;try{chooseNightBundle(assessments,bundles,35)}catch{rejected=true}assert(rejected);
+});
+Deno.test('truncated structured model output is an explicit non-blocking preparation failure',async()=>{
+ let failed=false;try{await composeNight({request:'35 minutes',minutes:35,brief:'Science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async()=>Response.json({status:'incomplete',output:[{content:[{type:'output_text',text:'{"publishers":['}]}]})});}catch(error){failed=error instanceof Error&&error.message.includes('incomplete reading plan')&&error.message.includes('Nothing was sent');}assert(failed);
+});
+
+Deno.test('editorial fit is considered before pruning feasible budgets or long replenished originals',()=>{
+ const article=(source:string,minutes:number)=>({...groups[0].items[0],source,author:null,published_at:null,excerpt:'',article_hash:source,body:'<p>'+('word '.repeat(225*minutes))+'</p>'});
+ const pool=nightCandidatePool([...Array.from({length:12},(_,i)=>article('Work '+i,7)),article('History',18),article('Science',10),article('Culture',7)],35);
+ assert(pool.length===15&&pool[12].source==='History','The long original survives replenishment');
+ const assessments=Object.fromEntries(pool.map((a,i)=>[String(i),{work_related:i<12,original_article:true,fit_score:4,topic:a.source}]));
+ const selected=chooseNightBundle(assessments,nightBundles(pool,35),35);
+ assert(selected.join(',')==='12,13,14','Suitable originals beyond the first fifty structural bundles remain eligible');
 });

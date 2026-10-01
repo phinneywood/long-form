@@ -1,0 +1,6 @@
+{
+  "source": "2026-10-01 live catalog evaluation, run 3",
+  "actual_order": ["Mathematicians Harness Randomness To Crack a 55-Year-Old Conjecture", "Building a Library in Wartime Paris", "One Giant Clam Contains a Month-by-Month Diary", "Biology Might Not Be Quantum"],
+  "failed_reason": "After the clam’s natural-history mystery, Booth’s account shifts the sequence to human history. It precedes the mathematical puzzle.",
+  "expected": "Freeze the selected order before generating introductions or placement explanations; context receives explicit actual previous and next titles."
+}
