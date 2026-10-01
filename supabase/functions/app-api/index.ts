@@ -1,4 +1,5 @@
 import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,firstIssueSummary,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
+import { publicationRoute } from "./publication.ts";
 import {extractArticle,extractionBudget} from "../_shared/article.ts";
 import {editionSchedulePatch} from "../_shared/schedule.ts";
 import {firstIssueInputKey,firstIssueInterrupted} from "../_shared/first-issue.ts";
@@ -52,6 +53,7 @@ Deno.serve(async(req)=>{
       const v=await verifyCode(email,code);logEvent("auth.verified",{request_id:requestId,user_id:v.user.id});return json({ok:true,token:v.raw,expires_at:v.expiresAt,...await dashboard(v.user.id,v.user.email)});
     }
     const a=await auth(req);if(!a)return json({error:"Unauthorized"},401);const {user,sessionId}=a;
+    const publication = await publicationRoute(req,route,user); if(publication)return publication;
     if(route==="/auth/logout"&&req.method==="POST"){const{error}=await admin.from("sessions").update({revoked_at:new Date().toISOString()}).eq("id",sessionId);if(error)throw error;return json({ok:true})}
     if(route==="/me"&&req.method==="GET")return json(await dashboard(user.id,user.email));
     if(route==="/system"&&req.method==="GET"){const health=await systemHealth(user.id);logEvent("system.health_viewed",{request_id:requestId,user_id:user.id,alerts:health.alerts.length});return json(health)}

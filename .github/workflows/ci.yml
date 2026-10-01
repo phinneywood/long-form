@@ -39,3 +39,31 @@ jobs:
           for (const script of scripts) new Function(script)
           console.log('Browser scripts parsed:', scripts.length)
           NODE
+
+  browser:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Verify publication on mobile and desktop
+        run: node tests/browser.mjs
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - name: Preserve existing settings and onboarding journeys
+        run: node tests/settings-browser.mjs
+        env:
+          BROWSER: ${{ matrix.browser }}
+          WIDTHS: 390
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-${{ matrix.browser }}
+          path: test-results/

@@ -81,7 +81,7 @@ Deno.test("organizer uses GPT-6 Luna structured output and cannot express omissi
   assert(requestBody?.text?.format?.schema?.properties?.articles?.minItems === input.length);
   assert(requestBody?.text?.format?.schema?.properties?.articles?.maxItems === input.length);
   const props = requestBody?.text?.format?.schema?.properties?.articles?.items?.properties || {};
-  assert(Object.keys(props).sort().join(",") === "id,section_name,topic_name", "organizer schema should expose placement only");
+  assert(Object.keys(props).sort().join(",") === "id,reason,section_name,topic_name", "organizer schema should expose placement and grounded rationale only");
   assert(!("include" in props) && !("omit" in props) && !("label" in props), "organizer schema must not offer an omission decision");
   const serialized = JSON.stringify(requestBody);
   assert(serialized.includes("MUST appear in the issue exactly once"), "prompt must state the all-eligible invariant");

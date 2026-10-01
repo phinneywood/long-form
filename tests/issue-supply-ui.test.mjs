@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Window } from 'happy-dom';
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m=>m[1]).find(s=>s.includes('function dashboard'));
-const source=script.slice(0,script.lastIndexOf('(async()=>{'));
+const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m=>m[1]).find(s=>s.includes('function legacyDashboard'));
+const source=script.replace('function legacyDashboard(', 'function dashboard(');
 async function run(code){const w=new Window({url:'https://reader.antonioskilton.com'});w.document.body.innerHTML='<div id="app"></div><div id="modal"></div><div id="toast"></div>';w.eval(readFileSync(new URL('../starter-editions.js',import.meta.url),'utf8'));try{return await w.eval(source+`\n(async()=>{${code}})()`)}finally{await w.happyDOM.abort()}}
 const report={name:'Checked feed',status:'ok',entries_seen:20,fresh_included:1,catchup_included:2,already_delivered:12,outside_window:3,duplicates:1,invalid:1,extraction_failed:0,out_of_scope:0,not_needed:0,resource_deferred:0,scan_limited:0,retries:1};
 const supply={estimated_reading_minutes:28,fresh_articles:1,catchup_articles:2,discovery_articles:1,failed_sources:1,unchecked_sources:0,short_issue:true,feed_reports:[report,{name:'Failed feed',status:'failed',error:'HTTP 502'}]};

@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f7f5f0">
-  <meta name="description" content="Long-form reading, organized into a calm daily Kindle publication that keeps you in charge of your attention.">
+  <meta name="description" content="Your personal publication, run by an AI editor. Read original articles, discuss ideas, and take an edition to Kindle.">
   <meta name="color-scheme" content="light">
   <title>Long Form</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/publication.css">
 </head>
 <body>
 <div id="app"></div>
@@ -163,8 +164,8 @@ function landing(error=''){
       <div class="auth-hero">
         <div class="auth-kicker">A PERSONAL DAILY PUBLICATION</div>
         <h1>Take back your attention.<br>Read something worth finishing.</h1>
-        <div class="auth-lede">Your favorite reading, gathered into one Kindle issue. Long Form keeps the original writing intact and gives it a thoughtful editorial shape.</div>
-        <div class="auth-benefits"><span>Original articles from your sources</span><span>Organized into one issue by an AI editor</span><span>Delivered to your Kindle when you choose</span></div>
+        <div class="auth-lede">Your personal publication, run by an AI editor. A finite edition of original writing, composed around your curiosity. Read here, discuss it with your editor, or take it to Kindle.</div>
+        <div class="auth-benefits"><span>Original articles from your sources</span><span>Organized into one issue by an AI editor</span><span>Read here or send to Kindle when you choose</span></div>
         <button class="btn primary" id="read-sample">Read a sample issue →</button>
       </div>
 
@@ -506,7 +507,7 @@ function runBadge(status){
 
 
 
-function dashboard(){
+function legacyDashboard(){
   const settings=state.settings;
   const sources=allSources();
   const problemFeeds=sources.filter(sourceNeedsAttention);
@@ -1060,9 +1061,9 @@ async function startApp(){
   }
   landing();
 }
-(async()=>{
-  await startApp();
-})();
+
 </script>
+<script src="/publication.js"></script>
+<script>startApp();</script>
 </body>
 </html>

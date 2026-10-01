@@ -4,6 +4,7 @@ import { extractArticle, extractionBudget, hydrateArticleImages, omitArticleImag
 import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "../_shared/delivery.ts";
 import { makeEpub, validateEpub, type EpubArticle } from "../_shared/epub.ts";
 import { prepareIssueSupply, type DeliveryRecord } from "../_shared/issue-supply.ts";
+import { publicationItems, featuredPath } from "../_shared/publication.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -98,6 +99,8 @@ async function sendResend(email: any, jobId: string) {
 async function queueScheduled() {
   const { error } = await admin.rpc("queue_due_daily_issues");
   if (error) throw error;
+  const web = await admin.rpc("queue_due_web_publications");
+  if (web.error) throw web.error;
 }
 
 async function digestForGroup(job: any, group: { section: any; items: EpubArticle[] }, providerEmailId: string) {
@@ -142,7 +145,7 @@ async function digestForGroup(job: any, group: { section: any; items: EpubArticl
     article_hash: article.article_hash,
     title: article.title,
     published_at: article.published_at,
-    delivery_kind: job.reason === "one_time" ? "one_time" : "recurring",
+    delivery_kind: job.reason === "one_time" || job.result?.publication_kind === "tonight" ? "one_time" : "recurring",
     delivered_at: new Date().toISOString(),
   }));
   if (deliveries.length) {
@@ -340,13 +343,31 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
   issueItems.push(...hydratedPending);
   if (hydratedPending.length) groups.push({ section: { id: null, name: "Saved articles" }, items: hydratedPending });
 
+  // Immutable reading copy, independent of seven-day outbox retention.
+  if (issueItems.length && job.reason !== "test" && !job.result?.publication_id) {
+    const readableGroups = groups.map(group => ({ ...group, items: group.items.map(item => {
+      let body = item.body;
+      for (const asset of item.assets || []) body = body.split(asset.href).join(`data:${asset.mediaType};base64,${base64(asset.bytes)}`);
+      return { ...item, body, assets: [] };
+    }) }));
+    const items = publicationItems(readableGroups), target = Number(job.result?.target_minutes) || 30;
+    const saved = await admin.from("publication_editions").upsert({
+      user_id: job.user_id, job_id: job.id, kind: job.result?.publication_kind || "daily",
+      title: job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Long Form",
+      target_minutes: target, created_at: job.created_at,
+      manifest: { version: 1, items, featured: job.result?.publication_kind === "tonight" ? items.map((_,i)=>i) : featuredPath(items,target),
+        introduction: issueIntroduction, issues, editorial: editorialSummary },
+    }, { onConflict: "job_id", ignoreDuplicates: true });
+    if (saved.error) throw saved.error;
+  }
+
   const testIdentity = testArtifactIdentity(job, now, timezone, displayDate, filenameDate);
   const attachments: any[] = [];
   if (issueItems.length) {
     const packagingStarted = performance.now();
     logEvent("digest.stage_started", { job_id: job.id, stage: "epub_packaging", articles: issueItems.length });
     const bytes = await makeEpub({
-      name: "Long Form", displayDate, date: now, timezone,
+      name: job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Long Form", displayDate, date: now, timezone,
       label: testIdentity?.coverLabel || "Daily issue",
       libraryTitle: testIdentity?.libraryTitle,
       introduction: issueIntroduction,
@@ -432,7 +453,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
   const job = claim.data;
   try {
     logEvent("digest.started", { job_id: job.id, user_id: job.user_id, reason: job.reason, attempt: job.attempts });
-    if (job.reason === "first_run_preview") {
+    if (["first_run_preview", "publication_preview"].includes(job.reason)) {
       const existing = await admin.from("delivery_outbox").select("*").eq("job_id", job.id).maybeSingle();
       if (existing.error) throw existing.error;
       let payload = existing.data?.payload;
@@ -455,7 +476,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     }
     const { build, providerId } = await dispatchPrepared({
       load: async () => { const r = await admin.from("delivery_outbox").select("*").eq("job_id", job.id).maybeSingle(); if (r.error) throw r.error; return r.data; },
-      prepare: () => job.result?.resend_of_job_id
+      prepare: () => job.result?.resend_of_job_id || job.result?.publication_id
         ? Promise.reject(new DeliveryNeedsReview("The frozen resend payload is missing; nothing was sent."))
         : prepareDeliveryPayload(job, deadline),
       freeze: async payload => { const r = await admin.from("delivery_outbox").insert({ job_id: job.id, payload }).select("*").single(); if (r.error) throw r.error; return r.data; },
@@ -488,7 +509,7 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
       resend_of_created_at: job.result.resend_of_created_at || null,
       resend_of_title: job.result.resend_of_title || null,
     } : {};
-    const finished = await admin.from("digest_jobs").update({ status, finished_at: new Date().toISOString(), result: { ...resendMeta, articles: total, sections: build.groups.length, feeds: build.feedCount, provider_email_id: providerId, packet_name: job.packet_name || null, edition_title: build.email.subject || null, warnings: warningMessages.length, issues: [...build.issues, ...warningMessages].slice(0, 30), editorial: (build as any).editorial || null, qa: (build as any).qa || null, media: (build as any).media || null } }).eq("id", job.id);
+    const finished = await admin.from("digest_jobs").update({ status, finished_at: new Date().toISOString(), result: { ...resendMeta, publication_id: job.result?.publication_id || null, articles: total, sections: build.groups.length, feeds: build.feedCount, provider_email_id: providerId, packet_name: job.packet_name || null, edition_title: build.email.subject || null, warnings: warningMessages.length, issues: [...build.issues, ...warningMessages].slice(0, 30), editorial: (build as any).editorial || null, qa: (build as any).qa || null, media: (build as any).media || null } }).eq("id", job.id);
     if (finished.error) throw finished.error;
     logEvent("digest.submitted", { job_id: job.id, user_id: job.user_id, status, articles: total, duration_ms: Math.round(performance.now() - started) });
     return { job: job.id, status, articles: total, sections: build.groups.length };

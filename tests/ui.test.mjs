@@ -4,8 +4,8 @@ import test from 'node:test';
 import { Window } from 'happy-dom';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m => m[1]).find(s => s.includes('function dashboard'));
-const source = script.slice(0, script.lastIndexOf('(async()=>{'));
+const script = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)].map(m => m[1]).find(s => s.includes('function legacyDashboard'));
+const source = script.replace('function legacyDashboard(', 'function dashboard(');
 const fixture = { user: { id: 'user-1', email: 'reader@example.com' }, settings: { onboarding_complete: true, kindle_email: 'example@kindle.com', paused: false, delivery_time: '06:00', timezone: 'UTC', editorial_brief: 'Software, design, history, cities, and excellent long-form essays.', editorial_instructions: 'Prefer essays and durable reporting over quick takes.' }, sections: [{ id: 's1', name: 'Reading', feeds: [{ id: 'f1', name: 'Example source', url: 'https://example.com/feed', enabled: false }] }, { id: 's2', name: 'Science', feeds: [] }], jobs: [], digests: [] };
 async function run(code) {
   const w = new Window({ url: 'https://reader.antonioskilton.com' });
@@ -83,7 +83,7 @@ test('explicit sign-out clears credentials only after server revocation succeeds
   assert.equal(result.retained,'test-token');assert.match(result.message,/Could not sign out/);assert.equal(result.saved,null);assert.ok(result.login);
 });
 
-test('dashboard has three calm surfaces with editor configuration on home', async () => {
+test('legacy source, editor and delivery settings retain their controls', async () => {
   const result = await run(`dashboard();const home=document.querySelector('.home-dashboard'),issue=document.querySelector('.issue-card'),library=document.querySelector('.library-card'),editor=document.querySelector('.editor-card'),body=document.querySelector('#sources-body'),toggle=document.querySelector('#toggle-sources');const homeResult={surfaces:home.children.length,issue:!!issue,editor:!!editor,heading:library.querySelector('h2').textContent,addInside:!!library.querySelector('#add-single-feed'),importInside:!!library.querySelector('#import-opml'),collapsed:body.hidden,expanded:toggle.getAttribute('aria-expanded'),readingList:document.querySelector('#one-time-send').textContent,paused:document.querySelector('.feed').textContent.includes('Paused'),history:!!document.querySelector('#delivery-history'),sectionControls:document.querySelectorAll('.remove-section,.rename-section,#add-section,.section-days-link').length,preferencesOnHome:!!document.querySelector('.preferences-panel'),editorText:editor.textContent,account:document.querySelector('#account-menu').textContent,more:document.querySelector('#delivery-menu').textContent,schedule:document.querySelector('.issue-schedule').textContent};accountMenuModal();return {...homeResult,accountMenu:modal.textContent}`);
   assert.equal(result.surfaces,3);assert.ok(result.issue&&result.editor);assert.equal(result.heading,'Sources');assert.ok(result.addInside&&result.importInside&&result.collapsed);assert.equal(result.expanded,'false');assert.match(result.readingList,/Add articles to this issue/);assert.ok(result.paused&&result.history);assert.equal(result.sectionControls,0);assert.equal(result.preferencesOnHome,false);assert.match(result.editorText,/Your editor/);assert.match(result.editorText,/Customized/);assert.equal(result.account,'Account');assert.equal(result.more,'•••');assert.match(result.schedule,/Daily at 06:00/);assert.doesNotMatch(result.accountMenu,/Editorial brief/);assert.match(result.accountMenu,/Kindle & delivery/);assert.match(result.accountMenu,/System health/);
 });

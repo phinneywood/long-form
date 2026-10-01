@@ -260,6 +260,17 @@ const TOOLS: any[] = [
   }
 ];
 
+// One authenticated application capability layer for UI and external agents.
+const PUBLICATION_TOOLS:any[] = [
+ {name:"list_publications",description:"List finite Long Form editions, featured paths, original-article metadata and preparation status. No inbox or automatic send.",path:"/publication/editions",method:"GET",properties:{},required:[],read:true},
+ {name:"read_publication_article",description:"Read an original in the exact edition by its zero-based position, including numbered paragraphs and reading state.",path:"/reader/article",method:"POST",properties:{edition_id:{type:"string"},position:{type:"integer",minimum:0}},required:["edition_id","position"],read:true},
+ {name:"discuss_reading",description:"Ask the same editor using actual edition/article/library/delivery context. Steering is temporary and proposals are never durably saved by this call. Does not send. Supply a stable request_key for retries.",path:"/editor/message",method:"POST",properties:{question:{type:"string",maxLength:4000},request_key:{type:"string",minLength:8,maxLength:120},edition_id:{type:"string"},position:{type:"integer",minimum:0},paragraph:{type:"integer",minimum:0}},required:["question","request_key"],read:false},
+ {name:"compose_reading_edition",description:"Compose Tonight’s Reading with original articles, a time budget and no recent repeats. Nothing is sent; inspect returned preparation status and edition before sending. Stable request_key required.",path:"/publication/compose",method:"POST",properties:{request:{type:"string",maxLength:4000},minutes:{type:"integer",minimum:10,maximum:120},request_key:{type:"string",minLength:8,maxLength:120}},required:["request","minutes","request_key"],read:false},
+ {name:"send_publication",description:"Only after the user explicitly asks to send this reviewed edition: queue its exact frozen EPUB to their configured Kindle address. Never recompose. Reuse request_key on retry and observe status; sent/partial mean provider acceptance, not Kindle arrival.",path:"/publication/send",method:"POST",properties:{edition_id:{type:"string"},request_key:{type:"string",minLength:8,maxLength:120}},required:["edition_id","request_key"],read:false},
+ {name:"get_publication_status",description:"Observe preparation/delivery status, omissions and edition identity. Never infer delivery from queuing.",path:"/publication/job",method:"GET",properties:{id:{type:"string"}},required:["id"],read:true},
+];
+for(const t of PUBLICATION_TOOLS){const security=t.read?READ_SECURITY:WRITE_SECURITY;TOOLS.push({name:t.name,description:t.description,inputSchema:{type:"object",properties:t.properties,required:t.required,additionalProperties:false},annotations:{readOnlyHint:t.read,destructiveHint:false,idempotentHint:true,openWorldHint:true},securitySchemes:security,_meta:{securitySchemes:security}});}
+
 function rpcResult(id: RpcId, result: unknown) {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), {
     status: 200,
@@ -369,6 +380,8 @@ function requiredScopes(toolName: string) {
   return (tool?.securitySchemes?.find((s: any) => s.type === "oauth2")?.scopes || []) as string[];
 }
 async function callTool(name: string, args: any, auth: AuthInfo) {
+  const capability=PUBLICATION_TOOLS.find(t=>t.name===name);
+  if(capability){const endpoint=capability.method==="GET"&&args?.id?`${capability.path}?id=${encodeURIComponent(args.id)}`:capability.path;return toolResult(await apiAsUser(auth.userId,endpoint,capability.method,capability.method==="GET"?undefined:args));}
   switch (name) {
     case "get_profile": {
       const profile = { id: auth.userId, email: auth.email, nickname: "Long Form" };

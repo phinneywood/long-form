@@ -98,6 +98,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       if (idFilter?.startsWith("eq.")) rows = rows.filter(row => row.id === idFilter.slice(3));
     }
     else if (table === "feeds") { if (body) feedUpdates.push(body);else rows = feeds; }
+    else if (table === "publication_editions") rows = [];
     else if (table === "digests") rows = [{ id: "digest-1" }];
     else if (table === "pending_issue_articles") { if(req.method === "DELETE")pendingDeletes++;rows = []; }
     else if (table === "article_deliveries") {
