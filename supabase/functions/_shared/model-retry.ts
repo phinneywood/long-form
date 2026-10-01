@@ -5,7 +5,20 @@ import { retryAfterMillis } from "./network-retry.ts";
 export async function modelResponse(request:()=>Promise<Response>,options:{deadline:number;now?:()=>number;sleep?:(ms:number)=>Promise<void>}){
  const now=options.now||Date.now,sleep=options.sleep||((ms:number)=>new Promise<void>(resolve=>setTimeout(resolve,ms)));
  for(let attempt=0;;attempt++){
-  const response=await request();
+  let response:Response;
+  try{
+   const received=await request();
+   // Buffer the non-streaming JSON response inside the retry boundary. A
+   // provider connection can fail after headers but before response.json().
+   const bytes=await received.arrayBuffer();
+   response=new Response(bytes,{status:received.status,statusText:received.statusText,headers:received.headers});
+  }catch(error){
+   const transient=error instanceof Error&&!['AbortError','TimeoutError'].includes(error.name)&&/connection|network|socket|fetch failed|premature|unexpected eof/i.test(error.message);
+   const delay=1000*2**attempt;
+   if(!transient||attempt>=2||now()+delay+5000>=options.deadline)throw error;
+   console.info(JSON.stringify({service:"editor",event:"model.transport_retry",attempt:attempt+1,delay_ms:delay}));
+   await sleep(delay);continue;
+  }
   if(response.ok||attempt>=2)return response;
   const error=await response.clone().json().catch(()=>({}));
   if(response.status===429){

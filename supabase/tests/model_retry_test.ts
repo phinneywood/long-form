@@ -11,3 +11,13 @@ Deno.test('model quota failures, long waits and exhausted deadlines never retry'
 Deno.test('persistent provider failures use at most two retries',async()=>{
  let calls=0,now=0;const r=await modelResponse(async()=>{calls++;return Response.json({error:{code:'server_error'}},{status:503})},{deadline:40000,now:()=>now,sleep:async ms=>{now+=ms}});assert(r.status===503&&calls===3&&now===3000);
 });
+
+Deno.test('transient provider body failures retry even after successful headers',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-model-body-connection.json',import.meta.url)));let calls=0,now=0;
+ const response=await modelResponse(async()=>{calls++;if(calls===1)return new Response(new ReadableStream({start(controller){controller.error(new TypeError(fixture.error))}}));return Response.json({actual:'complete plan'});},{deadline:40000,now:()=>now,sleep:async ms=>{now+=ms}});
+ assert(calls===2&&(await response.json()).actual==='complete plan'&&now===1000);
+});
+Deno.test('transport retries are bounded and aborts or programmer failures never retry',async()=>{
+ for(const error of [new DOMException('The operation was aborted','AbortError'),new Error('Invalid request configuration')]){let calls=0;let failed=false;try{await modelResponse(async()=>{calls++;throw error;},{deadline:40000,now:()=>0,sleep:async()=>{throw Error('Unsafe retry')}});}catch{failed=true}assert(failed&&calls===1);}
+ let calls=0,now=0,failed=false;try{await modelResponse(async()=>{calls++;throw new TypeError('Network connection failed');},{deadline:40000,now:()=>now,sleep:async ms=>{now+=ms}});}catch{failed=true}assert(failed&&calls===3&&now===3000);
+});

@@ -28,7 +28,11 @@ The first publisher-catalog batch produced **4/5 structural passes** (36, 35, 34
 
 The first fresh-account batch on the frozen-sequence version also produced **4/5 structural passes**, but manual review downgraded two because multi-original keyed placement prose was attached to the wrong originals. Its semantic result was **2/5**. The history-heavy stress account produced **1/5** on that version, all refusals being explicit and sending nothing. Neither result clears the editorial release gate.
 
-Current single-original-explanation release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
+The single-original-explanation batch completed **2/5** editions (30 and 32 minutes), with correct manually reviewed article/reason correspondence. Diagnostics showed the refusals were rejecting complete three-minute journalism as non-original, despite high fit scores. The criterion now explicitly includes complete short human-authored reporting, with an opening/ending sample marked as excerpted.
+
+The clarified-original-integrity batch produced **4/5 completed, manually reviewed passes**: 37/27/28/36 minutes, 3–4 originals, three sources and three or four broad subjects, with no repeats. Placement explanations described their own originals and actual sequence. One provider body-read connection failure aborted composition, with nothing sent. The existing bounded retry now buffers non-streaming provider responses so this transport failure is covered, while aborts and quota errors remain non-retriable.
+
+Current transport-resilient release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
 
 Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale and misbound original explanations. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
 

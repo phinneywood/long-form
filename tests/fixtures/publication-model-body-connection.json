@@ -1,0 +1,1 @@
+{"source":"2026-10-01 clarified-originals live batch, run 5","error":"error reading a body from connection","expected":"Buffer non-streaming provider JSON inside the bounded retry boundary so a transient body-read failure can retry; never retry user aborts or claim an edition was created or sent."}

@@ -1,0 +1,13 @@
+{
+  "source": "2026-10-01 single-original live batch, run 3",
+  "title": "Why Italian Fascists Loved Samurai",
+  "source_name": "JSTOR Daily",
+  "minutes": 3,
+  "failed_assessment": {
+    "work_related": false,
+    "original_article": false,
+    "fit_score": 4,
+    "topic": "History"
+  },
+  "expected": "A complete short human-authored reported article remains eligible for nighttime selection. Reporting on other research is not an AI-synthesized replacement. Check article completeness using original opening and ending; do not infer teaser status from length."
+}
