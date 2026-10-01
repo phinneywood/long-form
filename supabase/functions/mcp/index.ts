@@ -192,6 +192,32 @@ const TOOLS: any[] = [
     _meta: { securitySchemes: WRITE_SECURITY }
   },
   {
+    name: "get_delivery_history",
+    description: "List articles recently delivered by Long Form, including standalone packets and recurring issues. Use this to answer what was sent recently or avoid recommending articles already delivered.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum delivered articles to return. Defaults to 20." }
+      },
+      additionalProperties: false
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        items: { type: "array", items: { type: "object", properties: {
+          title:{type:"string"}, url:{type:"string"}, published_at:{type:["string","null"]},
+          delivered_at:{type:"string"}, delivery_kind:{type:"string"}, packet_name:{type:["string","null"]}, job_id:{type:["string","null"]}
+        }, required:["title","url","published_at","delivered_at","delivery_kind","packet_name","job_id"], additionalProperties:false } },
+        limit: { type: "integer" }
+      },
+      required: ["items","limit"],
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    securitySchemes: READ_SECURITY,
+    _meta: { securitySchemes: READ_SECURITY }
+  },
+  {
     name: "send_packet",
     description: "Queue a standalone Long Form EPUB from 1–20 article URLs and send it to the user's configured Kindle. Use dedupe_key to make repeated automation runs idempotent.",
     inputSchema: {
@@ -407,6 +433,11 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
         editorial_brief: String(after?.settings?.editorial_brief || ""),
         editorial_instructions: String(after?.settings?.editorial_instructions || ""),
       });
+    }
+    case "get_delivery_history": {
+      const requested = args?.limit === undefined ? 20 : Number(args.limit);
+      if (!Number.isInteger(requested) || requested < 1 || requested > 100) return toolResult({ error: "limit must be an integer from 1 to 100." }, true);
+      return toolResult(await apiAsUser(auth.userId, `/delivery-history?limit=${requested}`, "GET"));
     }
     case "send_packet": {
       const nameArg = String(args?.name || "").trim();
