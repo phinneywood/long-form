@@ -32,9 +32,15 @@ The single-original-explanation batch completed **2/5** editions (30 and 32 minu
 
 The clarified-original-integrity batch produced **4/5 completed, manually reviewed passes**: 37/27/28/36 minutes, 3–4 originals, three sources and three or four broad subjects, with no repeats. Placement explanations described their own originals and actual sequence. One provider body-read connection failure aborted composition, with nothing sent. The existing bounded retry now buffers non-streaming provider responses so this transport failure is covered, while aborts and quota errors remain non-retriable.
 
-Current transport-resilient release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
+The transport-resilient history-heavy batch produced **3/5 structural results**, but manual original-integrity review downgraded its final edition: an annotated list linked to six separate short stories rather than containing those originals. Its editorial result was **2/5**. The other failures were an incomplete native-search output and an infeasible assessed pool. Native output exhaustion now permits one larger-output retry within the same stage deadline; other incomplete plans still fail explicitly.
 
-Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale and misbound original explanations. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
+A fresh-history batch then produced **5/5 completed, manually reviewed passes** (33/27/35/33/35 minutes, 3–4 originals, three sources, 2–3 broad subjects). Explanations matched actual originals and neighbors, and the selected material was complete authored reporting or essays. No repeats were detected. This does not erase the history-heavy failures.
+
+Suitability is now assessed one original at a time, bounded to four concurrent calls, and retained for an unchanged original during replenishment. Annotated reading lists/roundups are explicitly excluded, while complete short human-authored journalism remains eligible. The final continuity batch uses the same account after those five editions; its result was **4/5 completed, manually reviewed passes** (41/32/42/33 minutes, 3–4 originals, three sources and 2–4 broad subjects, no repeats). The fifth request explicitly refused an infeasible suitable pool and sent nothing. This remains a composition-availability limitation, especially when several editions consume current publisher inventory in a short period; it is not counted as a successful edition. Structural counts alone cannot certify quality.
+
+SQL verification of the transport-resilient exact test submission confirmed identical frozen EPUB attachments and canonical original order, with provider acceptance and terminal partial status for two unsupported images. It does not confirm Amazon receipt.
+
+Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale and misbound original explanations, output-exhausted discovery and a reading-list integrity failure. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
 
 ## Current competitor evidence (October 1, 2026)
 
@@ -47,6 +53,8 @@ Regression fixtures preserve initial distributions, CPU preparation failure, pay
 The proposed advantage is the combined default: a recurring editorial mandate, finite budgeted original-article publications, deliberate pacing/diversity, and conversation with the editor grounded in the edition it actually selected. Competitor custom skills may reproduce parts of this workflow. This is a product-behavior claim, not an assertion of unique AI technology or a durable moat. If actual production only exposes a feed, reader and generic chat, or reliable composition cannot be demonstrated, the kill test fails.
 
 ## Release boundaries
+
+Final deterministic validation: **115 Deno and 74 Node tests**, all four edge entrypoints type checked, green Chromium/WebKit CI with publication screenshot journeys at 320/390/1440 pixels and retained onboarding/settings journeys. The final stricter-assessment exact test submission again verified identical frozen attachments and canonical original order, actual provider acceptance, idempotent retry and honest terminal partial notes.
 
 The migrations and API capabilities are additive and keep existing opaque-session authentication, backend-only RLS and MCP OAuth scopes. No agent SQL endpoint, new scheduler, plugin-publication dependency or security-protection bypass was added. The existing deterministic Kindle pipeline remains the output path. Frozen original text persists for reader/history independently of delivery-outbox cleanup; partial delivery notes explicitly report media omissions.
 

@@ -102,7 +102,7 @@ export async function composeNight(input:{request:string;minutes:number;brief:st
     const key=canonicalKey(c.url),a=await extractArticle({url:key,includeImages:false,budget:extractionBudget(Math.min(options.deadline-35_000,Date.now()+12_000))});
     if(excluded.has(canonicalKey(a.canonical_url))||articles.some(a2=>canonicalKey(a2.canonical_url)===canonicalKey(a.canonical_url)))continue;
     const subscribed=input.candidates.find(s=>{if(!s.feed_id)return false;try{return canonicalKey(s.url)===canonicalKey(a.canonical_url)||canonicalKey(s.url)===key}catch{return false}});
-    articles.push({...a,feed_id:subscribed?.feed_id||null,discovery_kind:subscribed?null:"open",discovery_reason:"Found by open-web discovery for this nighttime request."});
+    articles.push({...a,feed_id:subscribed?.feed_id||null,discovery_kind:subscribed?null:"open",discovery_reason:subscribed?null:"Found by open-web discovery for this nighttime request."});
    }catch(e){issues.push(`A candidate could not be extracted: ${e instanceof Error?e.message:String(e)}`)}}}
     await Promise.all([prepare(),prepare()]);
     articles.splice(0,articles.length,...nightCandidatePool(articles,input.minutes));

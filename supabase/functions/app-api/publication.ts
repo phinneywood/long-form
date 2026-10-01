@@ -70,7 +70,7 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     const old=await admin.from("reader_articles").select("id").eq("user_id",uid).eq("url",body.url).maybeSingle();if(old.error)throw old.error;
     if(old.data)return json({article_id:old.data.id});
     const article=await extractArticle({url:body.url,includeImages:false,budget:extractionBudget(Date.now()+25_000)});
-    const r=await admin.from("reader_articles").upsert({user_id:uid,url:body.url,article:{...article,assets:[],origin:"source feed",reason:"Opened from the chronological feed."}},{onConflict:"user_id,url"}).select("id").single();if(r.error)throw r.error;
+    const r=await admin.from("reader_articles").upsert({user_id:uid,url:body.url,article:{...article,assets:[],origin:"opened original",reason:"Opened for original-article reading."}},{onConflict:"user_id,url"}).select("id").single();if(r.error)throw r.error;
     return json({article_id:r.data.id});
   }
   if(route==="/reader/article"&&req.method==="POST") {
