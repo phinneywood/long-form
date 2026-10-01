@@ -1,0 +1,95 @@
+{
+  "source": "isolated production evaluation, 2026-10-01; initial implementation before budget/summary fixes",
+  "distribution": {
+    "total": 5,
+    "passed": 0
+  },
+  "runs": [
+    {
+      "number": 1,
+      "metrics": {
+        "article_count": 3,
+        "minutes": 34,
+        "sources": 2,
+        "topics": 3,
+        "repeated": 0,
+        "approximate_time": true
+      },
+      "error": null,
+      "articles": [
+        {
+          "title": "7 Crazy True Stories About the Victorian Era",
+          "source": "Atlas Obscura",
+          "minutes": 4
+        },
+        {
+          "title": "The different lives of fringe and strange scientific ideas | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 14
+        },
+        {
+          "title": "Cities are a borderland where the wild and built worlds meet | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 16
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "metrics": {
+        "article_count": 5,
+        "minutes": 72,
+        "sources": 2,
+        "topics": 5,
+        "repeated": 0,
+        "approximate_time": false
+      },
+      "error": null,
+      "articles": [
+        {
+          "title": "The Strange Tale of Sigmund Freud\u2019s Begonia",
+          "source": "Longreads",
+          "minutes": 2
+        },
+        {
+          "title": "How consciousness works. And why we believe in ghosts | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 16
+        },
+        {
+          "title": "How life made the earth into a cosmic marvel | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 11
+        },
+        {
+          "title": "How humanity moved from \u2018eternal\u2019 to \u2018bookended\u2019 time | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 22
+        },
+        {
+          "title": "History and philosophy should make us feel baffled and strange | Aeon Essays",
+          "source": "Aeon",
+          "minutes": 21
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "metrics": null,
+      "error": "Preparation did not reach a terminal state in three minutes.",
+      "articles": []
+    },
+    {
+      "number": 4,
+      "metrics": null,
+      "error": "Preparation did not reach a terminal state in three minutes.",
+      "articles": []
+    },
+    {
+      "number": 5,
+      "metrics": null,
+      "error": "/publication/compose 500: duplicate key value violates unique constraint \"publication_preview_active_user_key\"",
+      "articles": []
+    }
+  ]
+}

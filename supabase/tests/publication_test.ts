@@ -1,5 +1,5 @@
-import {featuredPath,publicationItems,summarizeEdition,editorReply,paragraphs} from "../functions/_shared/publication.ts";
-import {validateNightPlan,canonicalKey} from "../functions/_shared/night-edition.ts";
+import {featuredPath,publicationItems,summarizeEdition,editorReply,preferenceOnly,paragraphs} from "../functions/_shared/publication.ts";
+import {validateNightPlan,nightBundles,canonicalKey} from "../functions/_shared/night-edition.ts";
 function assert(v:unknown,m="Assertion failed"):asserts v{if(!v)throw new Error(m)}
 const original="This is a substantial original article about a carefully considered historical question. ".repeat(90);
 const groups=Array.from({length:4},(_,s)=>({section:{name:`Topic ${s}`},items:Array.from({length:9},(_,i)=>({title:`Original ${s}:${i}`,body:`<p>${original}</p>`,source:`Source ${s}`,feed_id:`feed-${s}`,url:`https://example.com/${s}/${i}`,canonical_url:`https://example.com/${s}/${i}`,assets:[],warnings:[],editorial_decision_reason:`Article ${s}:${i} supplies historical evidence for topic ${s}.`}))}));
@@ -27,3 +27,14 @@ Deno.test('night plan rejects duplicate IDs, invented IDs and work-related selec
  for(const bad of [{articles:[...plan.articles,plan.articles[0]]},{articles:[{...plan.articles[0],index:50}]},{articles:[{...plan.articles[0],work_related:true}]}]){let threw=false;try{validateNightPlan(bad,a,35)}catch{threw=true}assert(threw);}
  assert(canonicalKey('https://example.com/a?utm_source=x#anchor')==='https://example.com/a');
 });
+
+Deno.test('explicit nighttime preference steering cannot accidentally trigger composition',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-steering-misclassified.json',import.meta.url)));
+ const question=fixture.question;
+ assert(preferenceOnly(question));assert(!preferenceOnly('I have 35 minutes tonight. Find me something surprising.'));
+ const bad=fixture.response;
+ const reply=await editorReply({question,evidence:[]},{apiKey:'test',fetchImpl:async()=>Response.json({output:[{content:[{type:'output_text',text:JSON.stringify(bad)}]}]})});
+ assert(reply.action===fixture.expected_action&&reply.guidance===bad.guidance);
+});
+
+Deno.test('night budgets use extracted original lengths and at least three sources',()=>{const article=(source:string,minutes:number)=>({...groups[0].items[0],source,author:null,published_at:null,excerpt:'',article_hash:source,body:'<p>'+('word '.repeat(225*minutes))+'</p>'});const pool=[article('A',4),article('B',14),article('B',16),article('C',17),article('D',6)];const bundles=nightBundles(pool,35);assert(bundles.length>0);assert(bundles.every(b=>b.sources>=3&&b.minutes>=26.25&&b.minutes<=45.5&&b.indices.length>=3&&b.indices.length<=5));assert(nightBundles([article('A',30),article('B',20),article('C',22)],35).length===0);});

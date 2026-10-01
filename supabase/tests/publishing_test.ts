@@ -237,6 +237,10 @@ Deno.test("transcodes WebP-only publisher images to packaged PNG", async () => {
     assert(hydrated.assets[0].bytes[0] === 0x89 && hydrated.assets[0].bytes[1] === 0x50, "transcoded bytes should have a PNG signature");
     assert(!hydrated.warnings.some((warning) => warning.includes("only.webp")), "successful WebP transcoding should not emit an omission warning");
     assert(plainText(hydrated.body).includes("Article text survives."), "transcoding must not alter article text");
+    const edgeBudget=extractionBudget(Date.now()+10_000);edgeBudget.allowImageTranscoding=false;
+    const edge=await hydrateArticleImages(article,edgeBudget);
+    assert(edge.assets.length===0 && edge.media?.failed===1,"Edge preparation must skip unbounded WASM conversion");
+    assert(edge.warnings.some(w=>w.includes("CPU budget")) && plainText(edge.body).includes("Article text survives."),"CPU limits must be explicit while preserving original text");
   } finally {
     globalThis.fetch = originalFetch;
   }

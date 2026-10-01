@@ -14,7 +14,7 @@ async function loadEditions(){editions=(await api('/publication/editions')).edit
 const editionById=id=>editions.find(e=>e.id===id);
 const dateLabel=value=>new Intl.DateTimeFormat('en-US',{month:'long',day:'numeric',timeZone:state.settings.timezone||'UTC'}).format(new Date(value));
 const readableStatus=e=>['ready','sent','partial'].includes(e.preparation?.status);
-function editionList(e){return `<a class="edition-link" href="#edition/${esc(e.id)}"><span class="micro-label">${esc(e.kind==='tonight'?'Tonight’s Reading':'Daily edition')} · ${esc(dateLabel(e.created_at))}</span><h2>${esc(e.title)}</h2><p>${e.items.length} original articles · approximately ${e.minutes} min</p><span class="quiet-link">Open edition →</span></a>`;}
+function editionList(e){return `<a class="edition-link" href="#edition/${esc(e.id)}"><span class="micro-label">${esc(e.kind==='tonight'?'Tonight’s Reading':'Daily edition')} · ${esc(dateLabel(e.created_at))}</span><h2>${esc(e.title)}</h2><p>${e.featured.length} featured originals · approximately ${e.featured_minutes} min<span class="publication-item-meta">Complete edition: ${e.items.length} originals · ${e.minutes} min</span></p><span class="quiet-link">Open edition →</span></a>`;}
 async function publicationRoute(){
   const epoch=++publicationEpoch,route=currentRoute();readerFrame=null;
   try{
@@ -146,9 +146,9 @@ async function deliveryStatusPage(jobId,editionId){
   const epoch=++publicationEpoch;publicationShell(`<span class="micro-label">Kindle delivery</span><h1 id="delivery-title">Edition queued.</h1><p id="delivery-status" role="status">Checking the production delivery path…</p><div id="delivery-issues"></div><a class="btn" href="#edition/${esc(editionId)}">Return to your edition</a>`);
   for(let n=0;n<50&&epoch===publicationEpoch;n++){
     const r=await api('/publication/job?id='+encodeURIComponent(jobId));if(epoch!==publicationEpoch)return;
-    const s=r.job.status;document.querySelector('#delivery-status').textContent=({queued:'Queued for delivery.',running:'Submitting your frozen edition…',sent:'Accepted by the email provider. Arrival on your Kindle is not confirmed.',partial:'Accepted by the email provider with omissions. Review the notes below; arrival on Kindle is not confirmed.',failed:'Delivery failed. Nothing is claimed as delivered.'})[s]||s;
+    const s=r.job.status;document.querySelector('#delivery-status').textContent=({queued:'Queued for delivery.',running:'Submitting your frozen edition…',sent:'Accepted by the email provider. Arrival on your Kindle is not confirmed.',partial:'Accepted by the email provider with preparation notes. These may include omissions; review them below; arrival on Kindle is not confirmed.',failed:'Delivery failed. Nothing is claimed as delivered.'})[s]||s;
     document.querySelector('#delivery-issues').innerHTML=[r.job.error,...(r.job.result?.issues||[])].filter(Boolean).map(v=>`<p class="notice">${esc(v)}</p>`).join('');
-    if(['sent','partial','failed','empty','expired'].includes(s)){document.querySelector('#delivery-title').textContent=s==='sent'?'Edition submitted.':s==='partial'?'Submitted with omissions.':'Delivery needs attention.';return;}
+    if(['sent','partial','failed','empty','expired'].includes(s)){document.querySelector('#delivery-title').textContent=s==='sent'?'Edition submitted.':s==='partial'?'Submitted with notes.':'Delivery needs attention.';return;}
     await new Promise(r=>setTimeout(r,2500));
   }
 }

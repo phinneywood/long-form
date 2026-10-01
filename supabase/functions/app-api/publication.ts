@@ -1,17 +1,18 @@
 import { admin, json, preview, validUrl } from "./core.ts";
 import { extractArticle, extractionBudget } from "../_shared/article.ts";
 import { summarizeEdition, paragraphs, editorReply } from "../_shared/publication.ts";
+import { plainText } from "../_shared/article.ts";
 import { composeNight } from "../_shared/night-edition.ts";
 
 const uuid=(v:unknown)=>/^[0-9a-f-]{36}$/i.test(String(v||""));
 const key=(v:unknown)=>typeof v==="string"&&v.length>=8&&v.length<=120;
-async function ownedEdition(userId:string,id:string) {
-  const r=await admin.from("publication_editions").select("*").eq("user_id",userId).eq("id",id).maybeSingle();
-  if(r.error)throw r.error;if(!r.data)throw Object.assign(new Error("Edition not found."),{status:404});return r.data;
+async function ownedEdition(userId:string,id:string,full=false) {
+  const r=await admin.from("publication_editions").select(full?"*":"id,user_id,job_id,kind,title,target_minutes,created_at,manifest:summary").eq("user_id",userId).eq("id",id).maybeSingle();
+  if(r.error)throw r.error;if(!r.data)throw Object.assign(new Error("Edition not found."),{status:404});return r.data as any;
 }
 async function getArticle(userId:string,body:any) {
   if(uuid(body.edition_id)&&Number.isInteger(body.position)) {
-    const edition=await ownedEdition(userId,body.edition_id),article=edition.manifest.items[body.position];
+    const edition=await ownedEdition(userId,body.edition_id,true),article=edition.manifest.items[body.position];
     if(!article)throw Object.assign(new Error("Article not found."),{status:404});
     return {article,key:`${edition.id}:${body.position}`,edition};
   }
@@ -37,7 +38,7 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
   const uid=user.id;
   const body=req.method==="GET"?Object.fromEntries(new URL(req.url).searchParams):await req.json().catch(()=>({}));
   if(route==="/publication/editions"&&req.method==="GET") {
-    const r=await admin.from("publication_editions").select("*").eq("user_id",uid).order("created_at",{ascending:false}).limit(60);if(r.error)throw r.error;
+    const r=await admin.from("publication_editions").select("id,user_id,job_id,kind,title,target_minutes,created_at,manifest:summary").eq("user_id",uid).order("created_at",{ascending:false}).limit(60);if(r.error)throw r.error;
     const ids=(r.data||[]).map((e:any)=>e.job_id).filter(Boolean);
     const jobs=ids.length?await admin.from("digest_jobs").select("id,status,error,finished_at").eq("user_id",uid).in("id",ids):{data:[]};if((jobs as any).error)throw (jobs as any).error;
     return json({editions:(r.data||[]).map(e=>({...summarizeEdition(e),preparation:(jobs.data||[]).find((j:any)=>j.id===e.job_id)||null})),limit:60});
@@ -52,9 +53,7 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
   }
   if(route==="/publication/job"&&req.method==="GET") {
     if(!uuid(body.id))return json({error:"Invalid job."},400);
-    const r=await admin.from("digest_jobs").select("id,status,error,result,finished_at").eq("user_id",uid).eq("id",body.id).maybeSingle();if(r.error)throw r.error;if(!r.data)return json({error:"Job not found."},404);
-    const e=await admin.from("publication_editions").select("id").eq("user_id",uid).eq("job_id",body.id).maybeSingle();if(e.error)throw e.error;
-    return json({job:{...r.data,result:{articles:r.data.result?.articles,issues:r.data.result?.issues,publication_id:r.data.result?.publication_id}},edition_id:e.data?.id||null});
+    const r=await admin.rpc("publication_job_status",{p_user_id:uid,p_job_id:body.id});if(r.error)throw r.error;if(!r.data)return json({error:"Job not found."},404);return json(r.data);
   }
   if(route==="/publication/send"&&req.method==="POST") {
     if(!uuid(body.edition_id)||!key(body.request_key))return json({error:"Invalid delivery request."},400);
@@ -99,13 +98,15 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
   if(route==="/editor/message"&&req.method==="POST") {
     const question=String(body.question||"").trim();if(!question||question.length>4000||!key(body.request_key))return json({error:"Enter a question up to 4,000 characters."},400);
     const old=await admin.from("editor_messages").select("*").eq("user_id",uid).eq("request_key",body.request_key).maybeSingle();if(old.error)throw old.error;if(old.data)return json({message:old.data});
-    const [settings,conversation,messages,delivery,editions]=await Promise.all([
+    const [settings,conversation,messages,delivery,editions,readingStates,rawArticles]=await Promise.all([
       admin.from("user_settings").select("editorial_brief,editorial_instructions,evening_editorial_instructions").eq("user_id",uid).single(),
       admin.from("editor_conversations").select("*").eq("user_id",uid).maybeSingle(),
       admin.from("editor_messages").select("question,response").eq("user_id",uid).order("created_at",{ascending:false}).limit(12),
       admin.from("article_deliveries").select("id,title,canonical_url,delivered_at,delivery_kind").eq("user_id",uid).order("delivered_at",{ascending:false}).limit(500),
-      admin.from("publication_editions").select("*").eq("user_id",uid).order("created_at",{ascending:false}).limit(60),
-    ]);for(const r of [settings,conversation,messages,delivery,editions])if(r.error)throw r.error;
+      admin.from("publication_editions").select("id,user_id,job_id,kind,title,target_minutes,created_at,manifest:summary").eq("user_id",uid).order("created_at",{ascending:false}).limit(60),
+      admin.from("reading_states").select("*").eq("user_id",uid).order("updated_at",{ascending:false}).limit(100),
+      admin.from("reader_articles").select("id,article").eq("user_id",uid).order("created_at",{ascending:false}).limit(100),
+    ]);for(const r of [settings,conversation,messages,delivery,editions,readingStates,rawArticles])if(r.error)throw r.error;
     const evidence:any[]=[];let current:any=null,read:any=null;
     if(uuid(body.edition_id)){current=await ownedEdition(uid,body.edition_id);current=summarizeEdition(current);}
     if(Number.isInteger(body.position)||uuid(body.article_id)) {
@@ -114,14 +115,18 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
       evidence.push({id:"reading",...read});
     }
     if(current)for(const item of current.items)evidence.push({id:`edition:${current.id}:${item.position}`,title:item.title,url:item.url,edition_id:current.id,source:item.source,origin:item.origin,reason:item.reason,position:item.position,section:item.section_name,minutes:item.minutes});
-    const terms=question.toLowerCase().match(/[a-z]{4,}/g)?.filter(t=>!new Set(["have","sent","anything","about","lately","there","sources","offers","another","perspective","understand","these","paragraphs","article","first","reading","interesting","something","tonight"]).has(t))||[];
+    let terms=question.toLowerCase().match(/[a-z]{4,}/g)?.filter(t=>!new Set(["that","with","from","this","what","when","which","would","could","your","want","more","less","work","material","have","sent","anything","about","lately","there","sources","offers","another","perspective","understand","these","paragraphs","article","first","reading","interesting","something","tonight"]).has(t))||[];
+    if(read&&/another perspective|my sources|counterpoint/i.test(question))terms.push(...(read.title.toLowerCase().match(/[a-z]{5,}/g)||[]));
+    if(terms.includes("urbanism"))terms.push("urban","cities","city planning","housing","transit");
     const relevant=(s:string)=>terms.some(t=>s.toLowerCase().includes(t));
     const history=(delivery.data||[]).filter(r=>relevant(r.title));
     for(const h of history.slice(0,40))evidence.push({id:`delivery:${h.id}`,title:h.title,url:h.canonical_url,delivered_at:h.delivered_at,delivery_kind:h.delivery_kind});
     for(const e of editions.data||[])for(const item of e.manifest?.items||[])if(relevant([item.title,item.section_name,item.editorial_topic,item.excerpt].join(" "))&&e.id!==current?.id)evidence.push({id:`edition:${e.id}:${item.position}`,edition_id:e.id,position:item.position,title:item.title,url:item.url,source:item.source,excerpt:item.excerpt,created_at:e.created_at,reason:item.reason});
+    for(const a of rawArticles.data||[])if(relevant([a.article.title,a.article.excerpt,a.article.section_name].join(" ")))evidence.push({id:`library:${a.id}`,title:a.article.title,url:a.article.url,source:a.article.source,excerpt:plainText(a.article.body).slice(0,2500),content_status:"original extract"});
+    const sourceHistory=(editions.data||[]).flatMap(e=>(e.manifest?.items||[]).map((a:any)=>({title:a.title,url:a.url,origin:a.origin,created_at:e.created_at,reading:(readingStates.data||[]).find(s=>s.article_key===`${e.id}:${a.position}`)||null})));
     const sources=await activeSources(uid);
     if(/perspective|sources|counterpoint|contrast/i.test(question)){const raw=await chronological(uid);for(const item of raw.items.filter((a:any)=>relevant(a.title)).slice(0,20))evidence.push({id:`source:${item.feed_id}:${encodeURIComponent(item.url)}`,title:item.title,url:item.url,source:item.source,content_status:"headline only"});}
-    const result=await editorReply({question,current_edition:current,reading:read,settings:settings.data,temporary_guidance:conversation.data?.temporary_guidance||"",conversation:(messages.data||[]).reverse(),sources:sources.map(s=>({name:s.name,url:s.url})),evidence:evidence.slice(0,150),history_coverage:{records:delivery.data?.length||0,oldest:delivery.data?.at(-1)?.delivered_at||null,max_records:500,editions:editions.data?.length||0}});
+    const result=await editorReply({question,current_edition:current,reading:read,reading_history:sourceHistory.filter(a=>a.reading).slice(0,50),settings:settings.data,temporary_guidance:conversation.data?.temporary_guidance||"",conversation:(messages.data||[]).reverse(),sources:sources.map(s=>({name:s.name,url:s.url})),evidence:evidence.slice(0,150),history_coverage:{records:delivery.data?.length||0,oldest:delivery.data?.at(-1)?.delivered_at||null,max_records:500,editions:editions.data?.length||0}});
     if(result.action==="steer"&&result.guidance&&!result.unavailable){const r=await admin.from("editor_conversations").upsert({user_id:uid,temporary_guidance:result.guidance,updated_at:new Date().toISOString()});if(r.error)throw r.error;}
     const response={...result,citations:result.citations.map((id:string)=>evidence.find(e=>e.id===id)),base_guidance:settings.data!.evening_editorial_instructions,
       compose_request:result.action==="compose"?{request:question,minutes:result.minutes}:null};
@@ -132,15 +137,17 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     if(!key(body.request_key)||typeof body.request!=="string"||body.request.length>4000)return json({error:"Invalid edition request."},400);
     const k=`night-publication:${uid}:${body.request_key}`;
     const old=await admin.from("digest_jobs").select("id,status").eq("user_id",uid).eq("idempotency_key",k).maybeSingle();if(old.error)throw old.error;if(old.data)return json({job:old.data},202);
+    const active=await admin.from("digest_jobs").select("id").eq("user_id",uid).eq("reason","publication_preview").in("status",["queued","running"]).limit(1).maybeSingle();if(active.error)throw active.error;
+    if(active.data)return json({error:"Another edition is still being prepared. You can open your available reading or wait for it to finish.",job_id:active.data.id},409);
     const [settings,conversation,history,editions,raw]=await Promise.all([
       admin.from("user_settings").select("editorial_brief,evening_editorial_instructions").eq("user_id",uid).single(),
       admin.from("editor_conversations").select("temporary_guidance").eq("user_id",uid).maybeSingle(),
       admin.from("article_deliveries").select("canonical_url").eq("user_id",uid).gte("delivered_at",new Date(Date.now()-30*86400_000).toISOString()).limit(5000),
-      admin.from("publication_editions").select("manifest").eq("user_id",uid).gte("created_at",new Date(Date.now()-14*86400_000).toISOString()).limit(100),chronological(uid),
+      admin.from("publication_editions").select("manifest:summary").eq("user_id",uid).gte("created_at",new Date(Date.now()-14*86400_000).toISOString()).limit(100),chronological(uid),
     ]);for(const r of [settings,conversation,history,editions])if(r.error)throw r.error;
     const minutes=Math.max(10,Math.min(120,Math.trunc(Number(body.minutes)||35)));
     const prepared=await composeNight({request:body.request,minutes,brief:settings.data!.editorial_brief||"",guidance:[settings.data!.evening_editorial_instructions,conversation.data?.temporary_guidance].filter(Boolean).join("\n"),candidates:raw.items.slice(0,200),excluded:[...(history.data||[]).map(r=>r.canonical_url),...(editions.data||[]).flatMap(e=>(e.manifest.items||[]).map((a:any)=>a.canonical_url||a.url))]});
-    const r=await admin.from("digest_jobs").insert({user_id:uid,reason:"publication_preview",idempotency_key:k,lookback_hours:24,result:{publication_kind:"tonight",target_minutes:minutes,preparation_manifest:{version:2,...prepared,pendingItems:[],feedCount:0}}}).select("id,status").single();if(r.error)throw r.error;
+    const r=await admin.from("digest_jobs").insert({user_id:uid,reason:"publication_preview",idempotency_key:k,lookback_hours:24,result:{publication_kind:"tonight",target_minutes:minutes,preparation_manifest:{version:2,...prepared,pendingItems:[],feedCount:0}}}).select("id,status").single();if(r.error?.code==="23505")return json({error:"Another edition started preparing. Wait for it to finish before composing another."},409);if(r.error)throw r.error;
     await admin.rpc("kick_digest_worker");return json({job:r.data},202);
   }
   return json({error:"Not found."},404);

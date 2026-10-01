@@ -283,6 +283,7 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
 
   if (frozen?.version !== 3) {
     const budget = extractionBudget(deadline);
+    budget.allowImageTranscoding = false;
     const selected = [...selectedGroups.flatMap((group) => group.items), ...pendingItems];
     const hydrated = new Map<string, EpubArticle>();
     let imageCursor = 0;
@@ -345,20 +346,25 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
 
   // Immutable reading copy, independent of seven-day outbox retention.
   if (issueItems.length && job.reason !== "test" && !job.result?.publication_id) {
+    const existing=await admin.from("publication_editions").select("id").eq("job_id",job.id).eq("user_id",job.user_id).maybeSingle();if(existing.error)throw existing.error;
+    if(!existing.data){
     const readableGroups = groups.map(group => ({ ...group, items: group.items.map(item => {
       let body = item.body;
       for (const asset of item.assets || []) body = body.split(asset.href).join(`data:${asset.mediaType};base64,${base64(asset.bytes)}`);
       return { ...item, body, assets: [] };
     }) }));
     const items = publicationItems(readableGroups), target = Number(job.result?.target_minutes) || 30;
-    const saved = await admin.from("publication_editions").upsert({
+    const row = {
       user_id: job.user_id, job_id: job.id, kind: job.result?.publication_kind || "daily",
       title: job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Long Form",
       target_minutes: target, created_at: job.created_at,
       manifest: { version: 1, items, featured: job.result?.publication_kind === "tonight" ? items.map((_,i)=>i) : featuredPath(items,target),
         introduction: issueIntroduction, issues, editorial: editorialSummary },
-    }, { onConflict: "job_id", ignoreDuplicates: true });
+    };
+    const summary={...row.manifest,items:row.manifest.items.map(({body:_body,assets:_assets,...item})=>item)};
+    const saved=await admin.from("publication_editions").upsert({...row,summary},{onConflict:"job_id",ignoreDuplicates:true});
     if (saved.error) throw saved.error;
+    }
   }
 
   const testIdentity = testArtifactIdentity(job, now, timezone, displayDate, filenameDate);
@@ -368,7 +374,7 @@ async function buildRecurring(job: any, settings: any, now: Date, displayDate: s
     logEvent("digest.stage_started", { job_id: job.id, stage: "epub_packaging", articles: issueItems.length });
     const bytes = await makeEpub({
       name: job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Long Form", displayDate, date: now, timezone,
-      label: testIdentity?.coverLabel || "Daily issue",
+      label: testIdentity?.coverLabel || (job.result?.publication_kind === "tonight" ? "Tonight’s Reading" : "Daily issue"),
       libraryTitle: testIdentity?.libraryTitle,
       introduction: issueIntroduction,
     }, issueItems);
@@ -467,8 +473,10 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
         const frozen = await admin.from("delivery_outbox").insert({ job_id: job.id, payload });
         if (frozen.error) throw frozen.error;
       }
+      const {preparation_manifest:_frozen,...publicationMetadata}=job.result||{};
+      const resultBase=job.reason==="publication_preview"?publicationMetadata:(job.result||{});
       const ready = await admin.from("digest_jobs").update({ status: "ready", attempts: 0, finished_at: new Date().toISOString(), error: null,
-        result: { ...(job.result || {}), preview_review: { groups: payload.groups.map((group: any) => ({ section: group.section, items: group.items.map(({ assets, body, ...item }: any) => item) })), issues: payload.issues } },
+        result: { ...resultBase, articles: payload.groups.reduce((n:number,g:any)=>n+g.items.length,0), issues: payload.issues, preview_review: { groups: payload.groups.map((group: any) => ({ section: group.section, items: group.items.map(({ assets, body, ...item }: any) => item) })), issues: payload.issues } },
       }).eq("id", job.id);
       if (ready.error) throw ready.error;
       logEvent("first_issue.ready", { job_id: job.id, user_id: job.user_id, sections: payload.groups.length, duration_ms: Math.round(performance.now() - started) });

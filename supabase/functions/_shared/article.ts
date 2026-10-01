@@ -7,7 +7,7 @@ import { ImageMagick, initializeImageMagick, MagickFormat } from "npm:@imagemagi
 import { fetchPublic } from "./network.ts";
 export { fetchPublicText } from "./network.ts";
 
-export type ExtractionBudget = { imageBytes: number; deadline: number };
+export type ExtractionBudget = { imageBytes: number; deadline: number; allowImageTranscoding?: boolean };
 const INITIAL_IMAGE_DOWNLOAD_BYTES = 1_500_000;
 const MAX_IMAGE_DOWNLOAD_BYTES = 3_000_000;
 export function extractionBudget(deadline = Infinity): ExtractionBudget { return { imageBytes: 6_000_000, deadline: Math.min(Date.now() + 80_000, deadline) }; }
@@ -512,10 +512,13 @@ async function ensureImageMagick() {
   await imageMagickReady;
 }
 
-async function decodeSupportedImage(bytes: Uint8Array): Promise<{ bytes: Uint8Array; mediaType: ArticleAsset["mediaType"]; extension: string }> {
+async function decodeSupportedImage(bytes: Uint8Array, allowTranscoding = true): Promise<{ bytes: Uint8Array; mediaType: ArticleAsset["mediaType"]; extension: string }> {
   const detected = detectedImage(bytes);
   if (detected) return { bytes, ...detected };
   if (!isWebp(bytes)) throw new Error("unsupported image format");
+  // WASM conversion can exhaust an Edge invocation's CPU before it can save
+  // a checkpoint. Keep original text and report an explicit media omission.
+  if (!allowTranscoding) throw new Error("WebP conversion exceeds the delivery runtime CPU budget; original article text preserved");
 
   await ensureImageMagick();
   const outputs: Uint8Array[] = [];
@@ -565,7 +568,7 @@ async function embedImages(html: string, baseUrl: string, budget: ExtractionBudg
               timeoutMs: 8_000,
               deadline: budget.deadline,
             });
-            const image = await decodeSupportedImage(result.bytes);
+            const image = await decodeSupportedImage(result.bytes, budget.allowImageTranscoding !== false);
             received = result.bytes.length;
             return image;
           } finally {
