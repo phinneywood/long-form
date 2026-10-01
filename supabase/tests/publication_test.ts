@@ -1,5 +1,5 @@
-import {featuredPath,publicationItems,summarizeEdition,editorReply,preferenceOnly,paragraphs} from "../functions/_shared/publication.ts";
-import {validateNightPlan,nightBundles,canonicalKey} from "../functions/_shared/night-edition.ts";
+import {featuredPath,publicationItems,summarizeEdition,editorReply,editorExchanges,preferenceOnly,paragraphs} from "../functions/_shared/publication.ts";
+import {validateNightPlan,nightBundles,assessNightBundle,canonicalKey} from "../functions/_shared/night-edition.ts";
 function assert(v:unknown,m="Assertion failed"):asserts v{if(!v)throw new Error(m)}
 const original="This is a substantial original article about a carefully considered historical question. ".repeat(90);
 const groups=Array.from({length:4},(_,s)=>({section:{name:`Topic ${s}`},items:Array.from({length:9},(_,i)=>({title:`Original ${s}:${i}`,body:`<p>${original}</p>`,source:`Source ${s}`,feed_id:`feed-${s}`,url:`https://example.com/${s}/${i}`,canonical_url:`https://example.com/${s}/${i}`,assets:[],warnings:[],editorial_decision_reason:`Article ${s}:${i} supplies historical evidence for topic ${s}.`}))}));
@@ -21,6 +21,13 @@ Deno.test('editor receives actual paragraphs and never acquires arbitrary tools'
  let sent:any;await editorReply({reading:{visible_paragraphs:ps},evidence:[{id:'reading'}]},{apiKey:'test',fetchImpl:async(_u,i)=>{sent=JSON.parse(String(i?.body));return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify({answer:'The argument is grounded.',action:'answer',guidance:null,minutes:null,citations:['reading']})}]}]})}});
  assert(!sent.tools);assert(sent.input[1].content.includes('Second original argument.'));assert(sent.input[0].content.includes('confirmation action'));
 });
+Deno.test('reading conversation cannot replay another original or historical full-text citations',async()=>{
+ const fixture=JSON.parse(await Deno.readTextFile(new URL('../../tests/fixtures/publication-stale-reading-answer.json',import.meta.url))),url='https://example.com/current';
+ const current={question:fixture.question,response:{answer:'The current scene concerns a grave.',citations:[{url,title:fixture.current_title,full_text:'PRIVATE DUPLICATE BODY',visible_paragraphs:fixture.visible_paragraphs}]}},previous={question:fixture.question,response:{answer:fixture.failed_answer,citations:[{url:'https://example.com/previous',title:'Squirrel migration',full_text:'Previous original'}]}};
+ const exchanges=editorExchanges([current,previous],url);
+ assert(exchanges.length===1 && !JSON.stringify(exchanges).includes('squirrels') && !JSON.stringify(exchanges).includes('full_text') && !JSON.stringify(exchanges).includes('PRIVATE DUPLICATE BODY'));
+ assert(editorExchanges([current,previous]).length===2,'Global continuity retains compact exchanges');
+});
 Deno.test('night plan rejects duplicate IDs, invented IDs and work-related selections',()=>{
  const a=publicationItems(groups).slice(0,4),plan={articles:[0,1,2].map(index=>({index,topic:'History',reason:'Actual original evidence',work_related:false}))};
  assert(validateNightPlan(plan,a,35).selected.length===3);
@@ -38,3 +45,11 @@ Deno.test('explicit nighttime preference steering cannot accidentally trigger co
 });
 
 Deno.test('night budgets use extracted original lengths and at least three sources',()=>{const article=(source:string,minutes:number)=>({...groups[0].items[0],source,author:null,published_at:null,excerpt:'',article_hash:source,body:'<p>'+('word '.repeat(225*minutes))+'</p>'});const pool=[article('A',4),article('B',14),article('B',16),article('C',17),article('D',6)];const bundles=nightBundles(pool,35);assert(bundles.length>0);assert(bundles.every(b=>b.sources>=3&&b.minutes>=26.25&&b.minutes<=45.5&&b.indices.length>=3&&b.indices.length<=5));assert(nightBundles([article('A',30),article('B',20),article('C',22)],35).length===0);});
+
+Deno.test('model chooses an explicit feasible bundle without substituting or inventing original assessments',()=>{
+ const bundles=[{indices:[0,2,4]},{indices:[1,3,5]}],assessment=(index:number)=>({index,topic:'History',reason:'Actual text',work_related:false});
+ for(const plan of [{bundle:8,assessments:{}},{bundle:0,assessments:{0:{...assessment(0),rank:1},2:{...assessment(2),rank:2}}}]){let failed=false;try{assessNightBundle(plan,bundles)}catch{failed=true}assert(failed,'No unassessed or unavailable originals');}
+ const selected=assessNightBundle({bundle:0,assessments:{0:{...assessment(0),rank:2},2:{...assessment(2),rank:3},4:{...assessment(4),rank:1}}},bundles);
+ assert(selected.articles.map((a:any)=>a.index).join(',')==='4,0,2');
+ assert(assessNightBundle({bundle:0,assessments:{0:{...assessment(99),rank:1},2:{...assessment(2),rank:2},4:{...assessment(4),rank:3}}},bundles).articles[0].index===0,'Assessment data cannot replace an original ID');
+});

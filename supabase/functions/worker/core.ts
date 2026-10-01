@@ -570,8 +570,11 @@ export async function handleWorkerRequest(request: Request) {
       logEvent("worker.skipped", { invocation_id: invocationId, reason: "recently-run", duration_ms: Math.round(performance.now() - started) });
       return json({ ok: true, skipped: "recently-run" });
     }
-    await admin.from("digest_jobs").update({ status: "queued", run_after: new Date().toISOString(), error: "Recovered after stale worker claim." }).eq("status", "running").lt("started_at", new Date(Date.now() - 30 * 60_000).toISOString()).lt("attempts", 3);
-    await admin.from("digest_jobs").update({ status: "failed", finished_at: new Date().toISOString(), error: "Final worker attempt was interrupted. Check your Kindle and delivery history before sending again." }).eq("status", "running").lt("started_at", new Date(Date.now() - 30 * 60_000).toISOString()).gte("attempts", 3);
+    // The invocation deadline is 90 seconds and the platform wall limit is
+    // below five minutes. Recover interrupted work on the next normal cadence.
+    const staleBefore=new Date(Date.now()-5*60_000).toISOString();
+    await admin.from("digest_jobs").update({ status: "queued", run_after: new Date().toISOString(), error: "Recovered after stale worker claim." }).eq("status", "running").lt("started_at", staleBefore).lt("attempts", 3);
+    await admin.from("digest_jobs").update({ status: "failed", finished_at: new Date().toISOString(), error: "Final worker attempt was interrupted. Check your Kindle and delivery history before sending again." }).eq("status", "running").lt("started_at", staleBefore).gte("attempts", 3);
     await queueScheduled();
     const { data: jobs, error } = await admin.from("digest_jobs").select("*").eq("status", "queued").lte("run_after", new Date().toISOString()).order("created_at").limit(3);
     if (error) throw error;

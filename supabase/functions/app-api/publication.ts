@@ -1,6 +1,6 @@
 import { admin, json, preview, validUrl } from "./core.ts";
 import { extractArticle, extractionBudget } from "../_shared/article.ts";
-import { summarizeEdition, paragraphs, editorReply } from "../_shared/publication.ts";
+import { summarizeEdition, paragraphs, editorReply, editorExchanges } from "../_shared/publication.ts";
 import { plainText } from "../_shared/article.ts";
 import { composeNight } from "../_shared/night-edition.ts";
 
@@ -112,7 +112,7 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     if(Number.isInteger(body.position)||uuid(body.article_id)) {
       const a=await getArticle(uid,body),ps=paragraphs(a.article.body),start=Math.min(ps.length-1,Math.max(0,Math.trunc(Number(body.paragraph)||0)));
       read={title:a.article.title,source:a.article.source,origin:a.article.origin,url:a.article.url,paragraph_count:ps.length,visible_paragraphs:ps.slice(start,start+3).map((text,i)=>({number:start+i+1,text})),full_text:ps.map((p,i)=>`[${i+1}] ${p}`).join("\n").slice(0,65000)};
-      evidence.push({id:"reading",...read});
+      evidence.push({id:"reading",title:read.title,url:read.url,source:read.source,origin:read.origin,edition_id:a.edition?.id||null,position:body.position??null,article_id:a.article_id||null,content_status:"current original text supplied in reading"});
     }
     if(current)for(const item of current.items)evidence.push({id:`edition:${current.id}:${item.position}`,title:item.title,url:item.url,edition_id:current.id,source:item.source,origin:item.origin,reason:item.reason,position:item.position,section:item.section_name,minutes:item.minutes});
     let terms=question.toLowerCase().match(/[a-z]{4,}/g)?.filter(t=>!new Set(["that","with","from","this","what","when","which","would","could","your","want","more","less","work","material","have","sent","anything","about","lately","there","sources","offers","another","perspective","understand","these","paragraphs","article","first","reading","interesting","something","tonight"]).has(t))||[];
@@ -126,7 +126,12 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     const sourceHistory=(editions.data||[]).flatMap(e=>(e.manifest?.items||[]).map((a:any)=>({title:a.title,url:a.url,origin:a.origin,created_at:e.created_at,reading:(readingStates.data||[]).find(s=>s.article_key===`${e.id}:${a.position}`)||null})));
     const sources=await activeSources(uid);
     if(/perspective|sources|counterpoint|contrast/i.test(question)){const raw=await chronological(uid);for(const item of raw.items.filter((a:any)=>relevant(a.title)).slice(0,20))evidence.push({id:`source:${item.feed_id}:${encodeURIComponent(item.url)}`,title:item.title,url:item.url,source:item.source,content_status:"headline only"});}
-    const result=await editorReply({question,current_edition:current,reading:read,reading_history:sourceHistory.filter(a=>a.reading).slice(0,50),settings:settings.data,temporary_guidance:conversation.data?.temporary_guidance||"",conversation:(messages.data||[]).reverse(),sources:sources.map(s=>({name:s.name,url:s.url})),evidence:evidence.slice(0,150),history_coverage:{records:delivery.data?.length||0,oldest:delivery.data?.at(-1)?.delivered_at||null,max_records:500,editions:editions.data?.length||0}});
+    // Old answers are conversational history, never retrieval evidence. Do
+    // not replay original bodies embedded by earlier versions in citations.
+    // Contextual article questions receive only prior exchanges about this
+    // exact original; unrelated prior reading cannot masquerade as its text.
+    const exchanges=editorExchanges(messages.data||[],read?.url);
+    const result=await editorReply({question,current_edition:current,reading:read,reading_history:sourceHistory.filter(a=>a.reading).slice(0,50),settings:settings.data,temporary_guidance:conversation.data?.temporary_guidance||"",conversation:exchanges,sources:sources.map(s=>({name:s.name,url:s.url})),evidence:evidence.slice(0,150),history_coverage:{records:delivery.data?.length||0,oldest:delivery.data?.at(-1)?.delivered_at||null,max_records:500,editions:editions.data?.length||0}});
     if(result.action==="steer"&&result.guidance&&!result.unavailable){const r=await admin.from("editor_conversations").upsert({user_id:uid,temporary_guidance:result.guidance,updated_at:new Date().toISOString()});if(r.error)throw r.error;}
     const response={...result,citations:result.citations.map((id:string)=>evidence.find(e=>e.id===id)),base_guidance:settings.data!.evening_editorial_instructions,
       compose_request:result.action==="compose"?{request:question,minutes:result.minutes}:null};
