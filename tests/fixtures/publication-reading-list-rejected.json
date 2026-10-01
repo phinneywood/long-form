@@ -1,0 +1,5 @@
+{
+ "observed_title":"Minimalist Fiction in Six Short Stories",
+ "observed_integrity_failure":"An annotated list linked to six separate original stories rather than containing them; an assessment changed from false to true when replenishment changed the candidate context.",
+ "expected":"Assess one original independently, retain its assessment during replenishment, and reject reading-list/roundup collections."
+}

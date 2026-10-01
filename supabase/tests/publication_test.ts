@@ -83,13 +83,13 @@ Deno.test('composition sequences the exact extracted selection, never the whole 
   const result=await composeNight({request:'35 minutes, interesting and surprising, not work',minutes:35,brief:'History and science',guidance:'',candidates:[],excluded:[]},{apiKey:'test',fetchImpl:async(_u:any,i:any)=>{
    const sent=JSON.parse(i.body),input=JSON.parse(sent.input[1].content);let output:any;
    if(stages++===0)output={publishers:Array.from({length:5},(_,publisher)=>({domain:'8.8.8.8',urls:[`https://8.8.8.8/${publisher}`,`https://8.8.8.8/${publisher+5}`]}))};
-   else if(sent.text.format.schema.properties.assessments && Object.values(sent.text.format.schema.properties.assessments.properties)[0] instanceof Object && (Object.values(sent.text.format.schema.properties.assessments.properties)[0] as any).properties.fit_score){assert(sent.input[0].content.includes('Short original journalism'));assert(input.articles.every((a:any)=>typeof a.sample_is_excerpt==='boolean'&&'ending' in a));output={assessments:Object.fromEntries(input.articles.map((a:any)=>[String(a.index),{topic:a.index%2?'Culture':'Science',work_related:false,original_article:true,fit_score:5}]))};}
+   else if(sent.text.format.schema.properties.fit_score){assert(sent.input[0].content.includes('Short original journalism'));assert(sent.input[0].content.includes('Annotated reading lists'));assert(input.article?.text&&!input.articles,'Suitability is grounded in one original, never keyed multi-original bodies');assert(typeof input.article.sample_is_excerpt==='boolean'&&'ending' in input.article);const id=Number(input.article.title.split(' ').at(-1));output={topic:id%2?'Culture':'Science',work_related:false,original_article:true,fit_score:5};}
    else if(sent.text.format.schema.properties.assessments){sequenced=input.articles;chosen=sequenced.map(a=>a.index);assert(sequenced.length>=3&&sequenced.length<=5);output={assessments:Object.fromEntries(sequenced.map((a,i)=>[String(a.index),{rank:sequenced.length-i}]))};}
    else if(sent.text.format.schema.properties.reason){assert(input.article?.text&&!input.articles,'Placement is grounded in one original, never a keyed multi-original body');output={reason:`${input.article.title} is a ${input.role}, followed by ${input.next||'the end'}.`};}
    else{assert(input.articles.map((a:any)=>a.title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));output={introduction:'An introduction to the exact selected originals.'};}
    return Response.json({output:[{content:[{type:'output_text',text:JSON.stringify(output)}]}]});
   }});
-  assert(stages===4+chosen.length);assert(result.groups.map((g:any)=>g.items[0].title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));
+  assert(stages===13+chosen.length);assert(result.groups.map((g:any)=>g.items[0].title).join('|')===[...sequenced].reverse().map(a=>a.title).join('|'));
  }finally{globalThis.fetch=originalFetch;}
 });
 
