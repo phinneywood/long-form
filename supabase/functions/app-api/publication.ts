@@ -1,7 +1,8 @@
 import { admin, json, preview, validUrl } from "./core.ts";
 import { extractArticle, extractionBudget } from "../_shared/article.ts";
-import { summarizeEdition, paragraphs, editorReply, editorExchanges } from "../_shared/publication.ts";
+import { summarizeEdition, paragraphs, editorReply, editorExchanges, explicitEditionSend } from "../_shared/publication.ts";
 import { plainText } from "../_shared/article.ts";
+import { nightDiscovery } from "../_shared/night-discovery.ts";
 import { composeNight } from "../_shared/night-edition.ts";
 
 const uuid=(v:unknown)=>/^[0-9a-f-]{36}$/i.test(String(v||""));
@@ -98,6 +99,14 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
   if(route==="/editor/message"&&req.method==="POST") {
     const question=String(body.question||"").trim();if(!question||question.length>4000||!key(body.request_key))return json({error:"Enter a question up to 4,000 characters."},400);
     const old=await admin.from("editor_messages").select("*").eq("user_id",uid).eq("request_key",body.request_key).maybeSingle();if(old.error)throw old.error;if(old.data)return json({message:old.data});
+    // An explicit send instruction opens the same exact-edition review used
+    // by the publication. Neither a model nor this conversation call sends.
+    if(explicitEditionSend(question)&&uuid(body.edition_id)){
+      const edition=await ownedEdition(uid,body.edition_id);
+      const response={answer:`Review “${edition.title}” below to send its exact complete edition. Nothing has been sent yet.`,action:"send",guidance:null,minutes:null,citations:[],unavailable:false,send_request:{edition_id:edition.id}};
+      const row=await admin.from("editor_messages").insert({user_id:uid,request_key:body.request_key,question,response}).select("*").single();if(row.error)throw row.error;
+      return json({message:row.data});
+    }
     const [settings,conversation,messages,delivery,editions,readingStates,rawArticles]=await Promise.all([
       admin.from("user_settings").select("editorial_brief,editorial_instructions,evening_editorial_instructions").eq("user_id",uid).single(),
       admin.from("editor_conversations").select("*").eq("user_id",uid).maybeSingle(),
@@ -144,14 +153,15 @@ export async function publicationRoute(req:Request,route:string,user:{id:string;
     const old=await admin.from("digest_jobs").select("id,status").eq("user_id",uid).eq("idempotency_key",k).maybeSingle();if(old.error)throw old.error;if(old.data)return json({job:old.data},202);
     const active=await admin.from("digest_jobs").select("id").eq("user_id",uid).eq("reason","publication_preview").in("status",["queued","running"]).limit(1).maybeSingle();if(active.error)throw active.error;
     if(active.data)return json({error:"Another edition is still being prepared. You can open your available reading or wait for it to finish.",job_id:active.data.id},409);
-    const [settings,conversation,history,editions,raw]=await Promise.all([
+    const [settings,conversation,history,editions,raw,discovered]=await Promise.all([
       admin.from("user_settings").select("editorial_brief,evening_editorial_instructions").eq("user_id",uid).single(),
       admin.from("editor_conversations").select("temporary_guidance").eq("user_id",uid).maybeSingle(),
       admin.from("article_deliveries").select("canonical_url").eq("user_id",uid).gte("delivered_at",new Date(Date.now()-30*86400_000).toISOString()).limit(5000),
-      admin.from("publication_editions").select("manifest:summary").eq("user_id",uid).gte("created_at",new Date(Date.now()-14*86400_000).toISOString()).limit(100),chronological(uid),
+      admin.from("publication_editions").select("manifest:summary").eq("user_id",uid).gte("created_at",new Date(Date.now()-14*86400_000).toISOString()).limit(100),chronological(uid),nightDiscovery(),
     ]);for(const r of [settings,conversation,history,editions])if(r.error)throw r.error;
     const minutes=Math.max(10,Math.min(120,Math.trunc(Number(body.minutes)||35)));
-    const prepared=await composeNight({request:body.request,minutes,brief:settings.data!.editorial_brief||"",guidance:[settings.data!.evening_editorial_instructions,conversation.data?.temporary_guidance].filter(Boolean).join("\n"),candidates:raw.items.slice(0,200),excluded:[...(history.data||[]).map(r=>r.canonical_url),...(editions.data||[]).flatMap(e=>(e.manifest.items||[]).map((a:any)=>a.canonical_url||a.url))]});
+    const prepared=await composeNight({request:body.request,minutes,brief:settings.data!.editorial_brief||"",guidance:[settings.data!.evening_editorial_instructions,conversation.data?.temporary_guidance].filter(Boolean).join("\n"),candidates:raw.items.slice(0,200),discoveryCandidates:discovered.items,excluded:[...(history.data||[]).map(r=>r.canonical_url),...(editions.data||[]).flatMap(e=>(e.manifest.items||[]).map((a:any)=>a.canonical_url||a.url))]});
+    prepared.issues.push(...discovered.issues);
     const r=await admin.from("digest_jobs").insert({user_id:uid,reason:"publication_preview",idempotency_key:k,lookback_hours:24,result:{publication_kind:"tonight",target_minutes:minutes,preparation_manifest:{version:2,...prepared,pendingItems:[],feedCount:0}}}).select("id,status").single();if(r.error?.code==="23505")return json({error:"Another edition started preparing. Wait for it to finish before composing another."},409);if(r.error)throw r.error;
     await admin.rpc("kick_digest_worker");return json({job:r.data},202);
   }

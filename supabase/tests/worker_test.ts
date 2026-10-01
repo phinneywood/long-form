@@ -79,6 +79,8 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
     }
     assert(url.hostname === "database.example.invalid", "Unexpected network call " + url.hostname);
     if (url.pathname.includes("/rpc/kick_digest_worker")) return Response.json(1);
+    if(url.pathname.includes('/rpc/checkpoint_digest_preparation')){const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);job.result={...(job.result||{}),preparation_manifest:body.p_manifest};manifestWrites.push(structuredClone(body.p_manifest));return Response.json(true);}
+    if(url.pathname.includes('/rpc/archive_publication_edition')){const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);return Response.json('publication-id');}
     if (url.pathname.includes('/rpc/freeze_delivery_payload')) {
       const body=await req.json();assert(body.p_user_id===job.user_id&&body.p_job_id===job.id);
       if(failOutboxInsert){failOutboxInsert=false;return Response.json({message:'Outbox unavailable after manifest freeze'},{status:500});}

@@ -1,0 +1,47 @@
+# Personal publication release evaluation
+
+This is GitHub validation evidence for PR #72, not a product state file. Checks below separate deterministic regression coverage, live production-backend behavior, and outstanding user-visible production verification. A structural model result is not automatically an editorial pass.
+
+## Success criteria and evidence
+
+| Acceptance test | Observable release gate | Evidence / remaining verification |
+| --- | --- | --- |
+| 1 Finite edition | 30+ eligible originals retained exactly once; bounded diverse primary path, explicit end/time; Further reading; raw chronology secondary | 36-original deterministic fixture and Chromium/WebKit browser journey. Existing four-total-supplement eligibility regressions retained. Production authenticated display pending. |
+| 2 Editorial judgment | Actual recorded lead/order/brief/provenance, never generic invented history | Live lead explanations name the selected originals and distinguish discovered from subscribed material. A real wrong-neighbor explanation became a fixture; final sequence is frozen before contextualization. |
+| 3 Steering | Temporary guidance affects nighttime composition; separate durable confirmation; fixed rules remain intact | Live steering/confirmation followed by non-work compositions. Misclassified steering fixture, concurrent-preference and tenant RPC regressions. |
+| 4 Reading conversation | Actual current original and visible paragraph range; real library/source counterpoint with honest content coverage | Live original/state/discussion journey; five repeated correct answers for a historical passage after a previous wrong answer. Stale reading-answer fixture strips unrelated past context. Headline-only counterpoints are disclosed. |
+| 5 Tonight | 3–5 originals, 75–130% of 35 minutes from actual text, 3+ sources, diverse non-work subjects, no recent repeats | Repeated live batches documented below, with manual subject/order review. Final distribution pending completion. |
+| 6 Exact send | Frozen article set/order/attachment; same retry job; observable terminal state; provider acceptance interpreted correctly | Actual production worker submitted several exact editions to the official Resend test recipient. Terminal partial status disclosed media omissions. SQL/RPC tests verify exact bytes/order and immutable retries. A real user's configured Kindle submission remains pending authenticated browser verification. |
+| 7 Continuity | Actual dated delivery/read history and bounded coverage, not chat memory | Live newly accepted article retrieved from actual one-time delivery history; tenant boundary tested. Production user's older urbanism records still need user-visible verification. No history dates were fabricated or backdated. |
+| 8 Raw escape hatch | Sources → unfiltered chronology → original reader without AI selection | 93 actual feed items from three validation subscriptions; independent model-free endpoint and browser journey. |
+| 9 Model outage | Explicit failure; originals, chronology, reader and deterministic delivery continue | Unavailable key/503/invalid-citation/timeout/incomplete-plan fixtures, existing organizer-fallback delivery regressions, visible UI outage journey. No synthetic successful send. |
+| 10 Mobile | Edition/read/discuss/back-forward/retained state/exact review/status at iPhone widths, no overflow/modal stack | Real Chromium and WebKit automated fixture journeys at 320/390 px with screenshots and accessibility checks. Connected authenticated production journey remains pending. Fixture browser results do not prove integrated production mobile behavior. |
+| 11 Competitive kill test | Meaningful difference without Kindle or global mobile chat | Current official capabilities compared below. Final verdict depends on actual production publication behavior and editorial reliability; not declared passed from component presence. |
+
+## Repeated live evaluation
+
+All composition runs use actual OpenAI calls, fetched originals, the production app API and worker, an isolated paused validation account with three real subscribed anchors, and an official Resend test recipient. Each completed edition adds real dedupe history, so later runs face a shrinking candidate pool. This is a continuity stress test, not an independent identically distributed benchmark. Failed versions remain represented; counts must not be pooled across changing implementations as a single success rate.
+
+Early versions failed through combinations of extraction infeasibility, guessed reading lengths, edge CPU exhaustion during media conversion, provider rate limits, excessive native-search context, and oversized database writes. A wrong current-reading answer and a misclassified preference instruction were also preserved as fixtures and separately corrected. Bounded search alone remained unreliable (typically 1–2 usable editions in five requests). Native feed transport supplies actual current publisher URLs while relevance is still judged from content; it does not implicitly subscribe users or restrict the raw feed.
+
+The first publisher-catalog batch produced **4/5 structural passes** (36, 35, 34 and 35 minutes; 3–5 originals; 3+ sources; no repeats). Manual review downgraded the 34-minute run because placement explanations contradicted its actual neighbors. The refusal retained content and sent nothing. Another frozen-sequence batch produced **1/5 completed editions**: a large media-checkpoint write stalled preparation and later requests correctly encountered the active-edition guard. A mistakenly concurrent evaluator produced 0/5, mostly active-job rejections; it is a test-harness mistake, not an independent editorial benchmark. These failures led to preserving all feasible combinations until suitability assessment, freezing order before explaining it, and narrowly scoped 30-second backend writes for checkpoints/archive/outbox rather than changing database role limits.
+
+Current release-candidate batch: **pending**. Evaluate every completed introduction, order reason, subject and provenance; structural counts alone cannot certify quality. Preserve final counts and any failures here before closing the release gate.
+
+Regression fixtures preserve initial distributions, CPU preparation failure, payload timeout, wrong-reading context, steering misclassification, unselected rationale and wrong-neighbor rationale. They contain product-generated failures or short paraphrases, not copied original articles. Full runtime reports stay in ignored test-results rather than the repository.
+
+## Current competitor evidence (October 1, 2026)
+
+| Product | Established native capability | Implication for Long Form |
+| --- | --- | --- |
+| [Readwise Reader / Global Ghostreader](https://docs.readwise.io/reader/guides/ghostreader/global), [document chat](https://docs.readwise.io/reader/guides/ghostreader/chat) | Library retrieval with passage citations, skills including triage/find-similar/research, controlled read/write tools, persistent conversations, current-document text/metadata/reading position and mobile passage chat | Library chat, skills, source retrieval and contextual discussion are already established. They cannot support a differentiation claim. |
+| [Feedly automated newsletters](https://docs.feedly.com/article/692-guide-to-automated-newsletters), [AI newsletter options](https://docs.feedly.com/article/811-how-to-use-ai-in-automated-newsletter) | Scheduled finite issues from AI Feeds/Boards/Folders, review/reordering, templates, analytics, AI summaries/overviews/analysis including overview-only formats | Finite scheduled issues alone are not novel. Distinguish personal reading composition/pacing of complete originals from team intelligence distribution and synthesized overviews. |
+| [Inoreader automated intelligence reports](https://www.inoreader.com/blog/2026/03/automated-intelligence-reports-for-insights-delivered-to-you.html) | Scheduled multi-article AI intelligence reports, custom instructions and report management in a mature reader/monitoring system | Proactivity, customization and multi-document AI alone are not novel. Original-author reading and the default publication mandate must carry the difference. |
+
+The proposed advantage is the combined default: a recurring editorial mandate, finite budgeted original-article publications, deliberate pacing/diversity, and conversation with the editor grounded in the edition it actually selected. Competitor custom skills may reproduce parts of this workflow. This is a product-behavior claim, not an assertion of unique AI technology or a durable moat. If actual production only exposes a feed, reader and generic chat, or reliable composition cannot be demonstrated, the kill test fails.
+
+## Release boundaries
+
+The migrations and API capabilities are additive and keep existing opaque-session authentication, backend-only RLS and MCP OAuth scopes. No agent SQL endpoint, new scheduler, plugin-publication dependency or security-protection bypass was added. The existing deterministic Kindle pipeline remains the output path. Frozen original text persists for reader/history independently of delivery-outbox cleanup; partial delivery notes explicitly report media omissions.
+
+Do not mark the canonical PM card Done or claim all acceptance tests passed until merge/deployment hashes, CI, connected browser behavior, exact production submission/status, final repeated evaluation and competitive verdict are recorded.
