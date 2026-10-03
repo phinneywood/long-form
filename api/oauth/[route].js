@@ -27,10 +27,12 @@ export default async function handler(request) {
       body: request.method === 'POST' ? await request.arrayBuffer() : undefined,
       redirect: 'manual', signal: AbortSignal.timeout(15000),
     });
+    // Browsers can apply form-action to the post-login redirect too.
+    // ChatGPT is the existing trusted OAuth client, not a new form recipient.
     const outgoing = new Headers({
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://chatgpt.com; base-uri 'none'; frame-ancestors 'none'",
     });
     // Do not follow redirects: authorization codes must go only to the validated
     // client callback, never to a server-side fetch of that callback.
