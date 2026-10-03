@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "long-form-kindle",
+  "version": "1.2.0",
+  "description": "Route reading packets and custom documents through Long Form’s validated Kindle delivery pipeline.",
+  "author": {
+    "name": "Antonio Skilton"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Long Form",
+        "shortDescription": "Send reading to Kindle",
+        "longDescription": "Set up your Kindle, send original article packets or supplied documents, and check delivery status using your Long Form account. The full web reader, editor and scheduled editions remain available.",
+        "developerName": "Antonio Skilton",
+        "category": "Productivity",
+        "capabilities": [
+          "Set up Kindle without feeds or a schedule",
+          "Send original articles and structured documents",
+          "Check status and shared delivery history"
+        ]
+      },
+      "apps": "./.app.json"
+    }
+  }
+}
