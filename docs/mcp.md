@@ -17,6 +17,7 @@ Long Form keeps the model-facing surface intentionally narrow. The MCP does not 
 | `update_editorial_brief`, `update_editor_settings` | `reader:read reader:write` | Apply explicitly requested preferences within fixed product rules |
 | `get_delivery_history`, `get_packet_status` | `reader:read` | Retrieve actual delivery records and packet status |
 | `send_packet`, `send_now` | `reader:read reader:write` | Queue explicitly requested standalone or recurring delivery |
+| `send_custom_issue` | `reader:read reader:write` | Queue supplied custom text/HTML through the validated EPUB and frozen-outbox pipeline |
 | `list_publications` | `reader:read` | List finite editions, featured paths and preparation status |
 | `read_publication_article` | `reader:read` | Retrieve the actual original, numbered paragraphs and reading state |
 | `discuss_reading` | `reader:read reader:write` | Persist discussion grounded in edition, article, source/library and delivery context; steering remains temporary |
@@ -31,6 +32,12 @@ Composition, discussion and sending use stable `request_key` values for retries.
 Daily editions retain every deterministically eligible subscribed original. The featured path is a finite view; sending a daily edition includes Further reading. Tonight’s Reading sends the selected originals in their composed order. Neither path replaces original authors with generated summaries.
 
 Durable nighttime preference proposals require the separate confirmation in Long Form. `discuss_reading` does not silently apply them. Existing explicit settings tools remain available for user-authorized settings changes; fixed eligibility and delivery rules cannot be overridden.
+
+## Custom issues
+
+`send_custom_issue` accepts `title` (1–80 characters), exactly one of `content` or `sections`, optional `source_links` (up to 40 http(s) URLs), and optional `dedupe_key`. Each ordered section has `title` (1–200 characters), `content` (up to 250,000 characters), and optional `format` (`text` by default, or sanitized `html`). The total content limit is 1,000,000 characters and at most 20 sections. Citation links are appended as a Sources entry and are not fetched as article originals. Custom documents receive independent identities and cannot consume a subscribed original's delivery eligibility.
+
+The authenticated application queues the issue atomically through the service-role-only `queue_custom_issue` RPC. Same key and normalized payload returns the existing job; changed content with that key returns a conflict. The worker calls canonical `makeEpub()` and `validateEpub()`, embeds supported images using the normal bounded downloader, then freezes the MIME `application/epub+zip` attachment before sending through Resend. `get_packet_status` and `get_delivery_history` cover custom issues. `sent` confirms provider acceptance only; Amazon ingestion remains unconfirmed. No extra email is sent merely by installing the skill or preparing content.
 
 ## OAuth
 

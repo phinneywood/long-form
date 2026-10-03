@@ -236,8 +236,25 @@ const TOOLS: any[] = [
     _meta: { securitySchemes: WRITE_SECURITY }
   },
   {
+    name: "send_custom_issue",
+    description: "Queue supplied custom content as a validated Long Form EPUB to the configured Kindle. Provide content or ordered sections, not both. Text is literal; HTML is sanitized. Source links are citations, not article extraction. Use dedupe_key to prevent repeat sends and get_packet_status to verify provider acceptance; Amazon ingestion is not confirmed.",
+    inputSchema: {
+      type: "object", properties: {
+        title: {type:"string",minLength:1,maxLength:80},
+        content: {type:"string",minLength:1,maxLength:250000},
+        format: {type:"string",enum:["text","html"]},
+        sections: {type:"array",minItems:1,maxItems:20,items:{type:"object",properties:{title:{type:"string",minLength:1,maxLength:200},content:{type:"string",minLength:1,maxLength:250000},format:{type:"string",enum:["text","html"]}},required:["title","content"],additionalProperties:false}},
+        source_links: {type:"array",maxItems:40,items:{type:"string",maxLength:2048}},
+        dedupe_key: {type:"string",minLength:1,maxLength:120,pattern:"^[A-Za-z0-9._:-]+$"}
+      }, required:["title"], oneOf:[{required:["content"],not:{required:["sections"]}},{required:["sections"],not:{required:["content"]}}], additionalProperties:false
+    },
+    outputSchema:{type:"object",additionalProperties:true},
+    annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:true},
+    securitySchemes: WRITE_SECURITY, _meta:{securitySchemes:WRITE_SECURITY}
+  },
+  {
     name: "get_packet_status",
-    description: "Get the current status of a standalone Long Form packet job created by send_packet.",
+    description: "Get delivery status for send_packet or send_custom_issue. sent means email provider acceptance, not confirmed Amazon ingestion.",
     inputSchema: {
       type: "object",
       properties: { job_id: { type: "string", minLength: 1, description: "Job ID returned by send_packet." } },
@@ -452,6 +469,8 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
       if (!Number.isInteger(requested) || requested < 1 || requested > 100) return toolResult({ error: "limit must be an integer from 1 to 100." }, true);
       return toolResult(await apiAsUser(auth.userId, `/delivery-history?limit=${requested}`, "GET"));
     }
+    case "send_custom_issue":
+      return toolResult(await apiAsUser(auth.userId, "/custom-issue/queue", "POST", args));
     case "send_packet": {
       const nameArg = String(args?.name || "").trim();
       const urls = Array.isArray(args?.urls) ? args.urls.map((url: unknown) => String(url || "").trim()) : [];

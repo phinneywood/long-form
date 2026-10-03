@@ -94,7 +94,9 @@ The MCP exposes a narrow Long Form tool surface rather than generic database or 
 - `get_editor_settings`
 - `update_editor_settings`
 - `send_packet` — queue a standalone EPUB from explicit article URLs, with optional idempotency for automation
+- `send_custom_issue` — queue supplied text or ordered HTML/text sections through the same validated EPUB and retry-safe delivery pipeline, with optional citation links and idempotency
 - `get_packet_status` — check the delivery state of a standalone packet
+- Custom issues use the configured Kindle address and `Long Form <reader@antonioskilton.com>` sender. Citation links are preserved; custom text is identified separately from extracted original articles. A request to prepare content alone does not authorize sending it.
 - `send_now`
 - `list_publications`, `read_publication_article` — finite editions and original text
 - `discuss_reading` — grounded editorial discussion and temporary steering
