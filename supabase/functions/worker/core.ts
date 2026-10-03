@@ -166,20 +166,38 @@ async function buildOneTime(job: any, settings: any, now: Date, displayDate: str
   const name = String(job.packet_name || "").trim();
   const urls = Array.isArray(job.article_urls) ? job.article_urls.map(String) : [];
   if (!name || !urls.length || urls.length > 20) throw new Error("This one-time edition request is invalid.");
-  const budget = extractionBudget(deadline);
-  const items: EpubArticle[] = new Array(urls.length);const errors: { index: number; error: unknown }[] = [];let cursor = 0;
-  async function articleWorker() {
-    while (true) {
-      const index = cursor++;if (index >= urls.length) return;
-      try { items[index] = await extractArticle({ url: urls[index], includeImages: true, budget }); }
-      catch (error) { errors.push({ index, error }); }
-    }
+  // One article per invocation: Edge CPU limits apply to active computing, not
+  // elapsed time. Parallel extraction/transcoding cannot extend that budget.
+  // Keep ordered originals and prepared image bytes across retries, then build
+  // the EPUB in a separate invocation using the existing continuation path.
+  const frozen = job.result?.preparation_manifest;
+  if (frozen && (frozen.kind !== "one_time_packet" || frozen.version !== 1 ||
+    frozen.name !== name || JSON.stringify(frozen.urls) !== JSON.stringify(urls) ||
+    !Array.isArray(frozen.items) || frozen.items.length > urls.length ||
+    !Number.isFinite(frozen.imageBytesRemaining) || frozen.imageBytesRemaining < 0)) {
+    throw new DeliveryNeedsReview("The saved packet preparation does not match this request. Nothing was sent.");
   }
-  await Promise.all(Array.from({ length: Math.min(3, urls.length) }, () => articleWorker()));
-  if (errors.length) {
-    errors.sort((a, b) => a.index - b.index);const first = errors[0];
-    throw new Error(`Article ${first.index + 1} could not be prepared: ${first.error instanceof Error ? first.error.message : String(first.error)}`);
+  const items: EpubArticle[] = (frozen?.items || []).map((item: any) => ({
+    ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: Buffer.from(asset.bytes, "base64") })),
+  }));
+  if (items.length < urls.length) {
+    const index = items.length;
+    const budget = extractionBudget(deadline);
+    budget.imageBytes = Math.min(budget.imageBytes, frozen?.imageBytesRemaining ?? budget.imageBytes);
+    budget.allowImageTranscoding = false;
+    logEvent("packet.article_started", { job_id: job.id, article: index + 1, total: urls.length, url: urls[index] });
+    try { items.push(await extractArticle({ url: urls[index], includeImages: true, budget })); }
+    catch (error) { throw new Error(`Article ${index + 1} could not be prepared: ${error instanceof Error ? error.message : String(error)}`); }
+    const manifest = {
+      kind: "one_time_packet", version: 1, name, urls, imageBytesRemaining: budget.imageBytes,
+      items: items.map(item => ({ ...item, assets: (item.assets || []).map(asset => ({ ...asset, bytes: base64(asset.bytes) })) })),
+    };
+    const saved = await admin.rpc("checkpoint_digest_preparation", { p_job_id: job.id, p_user_id: job.user_id, p_manifest: manifest });
+    if (saved.error) throw saved.error;
+    logEvent("packet.article_completed", { job_id: job.id, article: index + 1, total: urls.length });
+    throw new FrozenManifestReady("packet-article");
   }
+  logEvent("packet.packaging_started", { job_id: job.id, articles: items.length });
   const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition" }, items);
   const qa = await validateEpub(bytes, items);
   const media = summarizeMedia(items);
@@ -594,7 +612,16 @@ export async function handleWorkerRequest(request: Request) {
     const deadline = Date.now() + 90_000;
     for (const job of jobs || []) {
       if (Date.now() > deadline - 20_000) break;
-      results.push(await processJob(job, deadline));
+      const result = await processJob(job, deadline);
+      results.push(result);
+      // One preparation/packaging stage per invocation. A continuation already
+      // kicks the queue; terminal results also kick any other selected work so
+      // covers for multiple packets cannot share one CPU budget.
+      if (!result?.continuation && (jobs || []).length > 1) {
+        const kick = await admin.rpc("kick_digest_worker");
+        if (kick.error) logEvent("worker.queue_kick_failed", { invocation_id: invocationId, error: kick.error.message }, "warn");
+      }
+      break;
     }
     logEvent("worker.completed", { invocation_id: invocationId, jobs: (jobs || []).length, duration_ms: Math.round(performance.now() - started) });
     return json({ ok: true, processed: results });

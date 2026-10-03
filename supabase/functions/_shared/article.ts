@@ -454,8 +454,13 @@ export function extractArticleDocument(pageHtml: string, pageUrl: string) {
   const author = meta(document, ['meta[name="author"]', 'meta[property="article:author"]']) || visibleAuthors(document) || structured.author;
   const title = meta(document, ['meta[property="og:title"]', 'meta[name="twitter:title"]']) || structured.title;
   const excerpt = meta(document, ['meta[name="description"]', 'meta[property="og:description"]']) || structured.excerpt;
-  const reader = new Readability(document as any, { charThreshold: 180 });
-  const parsed = reader.parse();
+  // Mintlify explicitly identifies the authored documentation body. Readability
+  // treats its heavily wrapped code blocks as UI and can silently delete every
+  // example. Use that body directly, then apply the same sanitizer below.
+  const documentation = document.querySelector("#content.mdx-content");
+  const parsed = documentation
+    ? { content: documentation.innerHTML, title: document.title, siteName: source, byline: author, excerpt }
+    : new Readability(document as any, { charThreshold: 180 }).parse();
   if (!parsed?.content || plainText(parsed.content).length < 180) throw new Error("Long Form could not identify the main article text.");
   const finalSource = normalizeTitle(parsed.siteName || source);
   let finalTitle = normalizeTitle(title || parsed.title || document.title || "Untitled");

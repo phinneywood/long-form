@@ -1,9 +1,18 @@
 import { assertPublic, fetchPublic, isPublicAddress, readLimited } from "../functions/_shared/network.ts";
-import { extractionBudget, extractArticle, sanitizeArticleHtml } from "../functions/_shared/article.ts";
+import { extractionBudget, extractArticle, extractArticleDocument, sanitizeArticleHtml } from "../functions/_shared/article.ts";
 import { checkAttachmentBudget, dispatchPrepared, DeliveryNeedsReview, type Outbox, type PreparedDelivery } from "../functions/_shared/delivery.ts";
 
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 async function rejects(fn: () => unknown, contains?: string) { try { await fn(); } catch (e) { if (contains) assert(String(e).includes(contains), String(e)); return e; } throw new Error("Expected rejection"); }
+
+Deno.test("authored Mintlify documentation preserves all code examples, headings and prose without navigation", () => {
+  const examples = Array.from({ length: 12 }, (_, i) => `<div class="code-block"><button>Copy</button><pre><code><span class="line"><span>if x &lt; ${i}:\n    run(${i})</span></span></code></pre></div>`).join("");
+  const page = extractArticleDocument(`<html><head><title>Primary documentation</title><meta property="og:site_name" content="Documentation"></head><body><nav>Unrelated navigation</nav><main><aside>Other pages</aside><div id="content" class="mdx-content prose"><p>${"Original authored documentation. ".repeat(15)}</p><h2>Examples</h2>${examples}<h2>Further details</h2><p>Final original paragraph.</p></div><footer>Feedback controls</footer></main></body></html>`, "https://example.com/docs");
+  assert((page.html.match(/<pre>/g) || []).length === 12);
+  for (let i = 0; i < 12; i++) assert(page.html.includes(`run(${i})`));
+  assert(page.html.includes("<h2>Examples</h2>") && page.html.includes("Final original paragraph."));
+  assert(!/Unrelated navigation|Other pages|Feedback controls|<button>/.test(page.html));
+});
 
 Deno.test("rejects private, mapped, reserved and non-http destinations", async () => {
   for (const ip of ["127.0.0.1", "10.0.0.1", "169.254.169.254", "100.64.0.1", "192.0.2.1", "198.18.0.1", "224.0.0.1", "::1", "::", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "::ffff:7f00:1", "2001:db8::1"]) {
