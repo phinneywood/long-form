@@ -80,6 +80,10 @@ Production:
 - `supabase/functions/oauth` — OAuth authorization server for MCP account linking
 - `supabase/migrations` — migration history matching production
 
+## ChatGPT integration source
+
+The [ChatGPT skill/package source](integrations/chatgpt/README.md) lives with this product. It preserves the existing Long Form 1.2.0 installation and registered service wiring. The earlier MCP manifest under `plugin/long-form/` is a separate artifact. Source relocation does not change the web UI or deploy a new service.
+
 ## MCP
 
 The MCP exposes a narrow Long Form tool surface rather than generic database or HTTP access:
