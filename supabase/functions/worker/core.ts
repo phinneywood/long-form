@@ -159,7 +159,7 @@ async function buildOneTime(job: any, settings: any, now: Date, displayDate: str
   if (job.custom_issue) {
     const issue = customIssueInput({ ...job.custom_issue, sections: job.custom_issue.sections });
     const items = await customIssueArticles(issue, job.id, extractionBudget(deadline));
-    const bytes = await makeEpub({ name: issue.title, displayDate, date: now, timezone: settings.timezone || "UTC", label: "Custom issue" }, items);
+    const bytes = await makeEpub({ name: issue.title, displayDate, date: now, timezone: settings.timezone || "UTC", label: "Reading packet", document: true }, items);
     const qa = await validateEpub(bytes, items);
     return { attachments: [{filename:`${slug(issue.title)}-${filenameDate}.epub`,content:base64(bytes),content_type:"application/epub+zip"}], groups:[{section:{id:null,name:issue.title},items}], feedCount:0, issues:[] as string[], subject:`${issue.title} — ${displayDate}`, qa, media:summarizeMedia(items) };
   }

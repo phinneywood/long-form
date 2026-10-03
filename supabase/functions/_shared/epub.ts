@@ -32,6 +32,8 @@ export type EpubOptions = {
   timezone: string;
   label?: string;
   libraryTitle?: string;
+  /** Custom documents have chapter navigation and an issue-title cover. */
+  document?: boolean;
   maxAssetBytes?: number;
   introduction?: string | null;
 };
@@ -235,7 +237,7 @@ export async function makeCoverPng(options: EpubOptions, articleCount: number, c
       fontSize: 15, fontWeight: 800, letterSpacing: 1.7, textTransform: "uppercase",
     },
   },
-  element("div", null, `${articleCount} ${articleCount === 1 ? "story" : "stories"}`),
+  element("div", null, `${articleCount} ${options.document ? (articleCount === 1 ? "chapter" : "chapters") : (articleCount === 1 ? "story" : "stories")}`),
   element("div", { style: { textTransform: "none", letterSpacing: .4 } }, "reader.antonioskilton.com")));
 
   const response = new ImageResponse(cover, { width: 1200, height: 1920, fonts: coverFonts });
@@ -260,7 +262,8 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   zip.folder("META-INF")!.file("container.xml", `<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const output = zip.folder("OEBPS")!;
-  const cover = await makeCoverJpeg(options, articles.length, buildCoverLines(articles));
+  const documentCover = [{ section: options.name, story: "" }, ...articles.filter(a => a.title !== options.name && a.title !== "Sources").slice(0, 2).map(a => ({ section: a.title, story: "" }))];
+  const cover = await makeCoverJpeg(options, articles.length, options.document ? documentCover : buildCoverLines(articles));
   // JPEG/PNG/GIF are already compressed. Deflating them again burns the
   // worker's CPU budget for negligible savings; keep text compressed below.
   output.file("cover.jpg", cover, { compression: "STORE" });
@@ -282,7 +285,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     return { ...article, body: xmlBody(body) };
   });
 
-  const css = `body{font-family:serif;line-height:1.55;margin:5%;color:#171717}h1{font-size:1.7em;line-height:1.12;margin-bottom:.3em}h2,h3,h4,h5,h6{line-height:1.2;margin:1.35em 0 .45em}.date,.source,.meta,.caption,figcaption{color:#595959;font-size:.88em}.meta{margin:.25em 0 1.15em}.article-rule{border:0;border-top:1px solid #aaa;margin:0 0 1.5em}a{color:#111}pre{white-space:pre-wrap;font-family:monospace;font-size:.86em;background:#f2f2f2;padding:.8em}code{font-family:monospace}blockquote{margin-left:.6em;border-left:2px solid #888;padding-left:1em}figure{margin:1.4em 0}img{display:block;max-width:100%;height:auto;margin:1em auto}figcaption{line-height:1.35;margin-top:.4em}table{border-collapse:collapse;width:100%;font-size:.82em;margin:1.2em 0}th,td{border:1px solid #888;padding:.38em;vertical-align:top}th{font-weight:bold}dl{margin:1em 0}dt{font-weight:bold;margin-top:.7em}dd{margin-left:1em}.contents{margin-top:.7em}.publication-title{font-size:1.75em;margin-bottom:.08em}.contents-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.09em;text-transform:uppercase;color:#595959;margin:1.25em 0 .55em}.section-index-item{border-top:1px solid #777;padding:.72em 0 .8em}.section-index-name{display:block;font-weight:bold;font-size:1.17em;line-height:1.15}.section-index-count{display:block;color:#666;font-family:sans-serif;font-size:.74em;margin-top:.12em}.contents-topic{margin-top:.45em}.contents-topic-name{font-family:sans-serif;font-size:.72em;font-weight:bold;letter-spacing:.035em;margin:.48em 0 .14em;color:#666}.contents-article{display:block;font-size:.84em;line-height:1.18;margin:.12em 0;color:#171717}.contents-article+.contents-article{margin-top:.16em}.section-divider{padding-top:8%}.divider-rule{border-top:2px solid #111;margin:0 0 1em}.section-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;color:#595959}.section-name{font-size:2.55em;line-height:.98;margin:.18em 0 .16em;hyphens:none}.section-count{font-family:sans-serif;font-size:.82em;color:#595959;margin-bottom:.65em}.section-deck{font-size:1.02em;line-height:1.42;color:#555;margin:.35em 0 1.15em;max-width:28em}.introduction{padding-top:3%;max-width:32em}.intro-rule{border-top:2px solid #111;margin:0 0 .9em}.intro-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.11em;text-transform:uppercase;color:#595959;margin:.85em 0 0}.intro-copy{font-size:1.12em;line-height:1.5;margin:.95em 0 0}.original{margin-top:2em;padding-top:1em;border-top:1px solid #999;font-family:sans-serif;font-size:.78em;color:#666}.original a{color:#666;text-decoration:none}`;
+  const css = `body{font-family:serif;line-height:1.55;margin:5%;color:#171717}h1{font-size:1.7em;line-height:1.12;margin-bottom:.3em}h2,h3,h4,h5,h6{line-height:1.2;margin:1.35em 0 .45em}.date,.source,.meta,.caption,figcaption{color:#595959;font-size:.88em}.meta{margin:.25em 0 1.15em}.article-rule{border:0;border-top:1px solid #aaa;margin:0 0 1.5em}a{color:#111}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:monospace;font-size:.86em;background:#f2f2f2;padding:.8em}code{font-family:monospace}p{margin:.7em 0}li{margin:.3em 0}ul,ol{padding-left:1.4em}h2,h3{page-break-after:avoid}blockquote{margin-left:.6em;border-left:2px solid #888;padding-left:1em}figure{margin:1.4em 0}img{display:block;max-width:100%;height:auto;margin:1em auto}figcaption{line-height:1.35;margin-top:.4em}table{border-collapse:collapse;width:100%;font-size:.82em;margin:1.2em 0}th,td{border:1px solid #888;padding:.38em;vertical-align:top}th{font-weight:bold}dl{margin:1em 0}dt{font-weight:bold;margin-top:.7em}dd{margin-left:1em}.contents{margin-top:.7em}.publication-title{font-size:1.75em;margin-bottom:.08em}.contents-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.09em;text-transform:uppercase;color:#595959;margin:1.25em 0 .55em}.section-index-item{border-top:1px solid #777;padding:.72em 0 .8em}.section-index-name{display:block;font-weight:bold;font-size:1.17em;line-height:1.15}.section-index-count{display:block;color:#666;font-family:sans-serif;font-size:.74em;margin-top:.12em}.contents-topic{margin-top:.45em}.contents-topic-name{font-family:sans-serif;font-size:.72em;font-weight:bold;letter-spacing:.035em;margin:.48em 0 .14em;color:#666}.contents-article{display:block;font-size:.84em;line-height:1.18;margin:.12em 0;color:#171717}.contents-article+.contents-article{margin-top:.16em}.section-divider{padding-top:8%}.divider-rule{border-top:2px solid #111;margin:0 0 1em}.section-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;color:#595959}.section-name{font-size:2.55em;line-height:.98;margin:.18em 0 .16em;hyphens:none}.section-count{font-family:sans-serif;font-size:.82em;color:#595959;margin-bottom:.65em}.section-deck{font-size:1.02em;line-height:1.42;color:#555;margin:.35em 0 1.15em;max-width:28em}.introduction{padding-top:3%;max-width:32em}.intro-rule{border-top:2px solid #111;margin:0 0 .9em}.intro-kicker{font-family:sans-serif;font-size:.7em;font-weight:bold;letter-spacing:.11em;text-transform:uppercase;color:#595959;margin:.85em 0 0}.intro-copy{font-size:1.12em;line-height:1.5;margin:.95em 0 0}.original{margin-top:2em;padding-top:1em;border-top:1px solid #999;font-family:sans-serif;font-size:.78em;color:#666}.original a{color:#666;text-decoration:none}`;
   output.file("style.css", css);
 
   const navGroups: {
@@ -303,7 +306,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   }
 
   const sectionPages = navGroups.map((group, groupIndex) => {
-    const hasDivider = prepared.length > 2;
+    const hasDivider = !options.document && prepared.length > 2;
     const dividerHref = `section-${groupIndex + 1}.xhtml`;
     const articleCount = group.topics.reduce((count, topic) => count + topic.items.length, 0);
     const firstArticleIndex = group.topics.flatMap((topic) => topic.items)[0]?.index ?? null;
@@ -316,7 +319,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     output.file("introduction.xhtml", `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Editor's note — ${esc(options.name)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><main class="introduction"><div class="intro-rule"></div><p class="date">${esc(options.displayDate)}</p><p class="intro-kicker">Editor's note</p><p class="intro-copy">${esc(introduction)}</p></main></body></html>`);
   }
 
-  const machineNavItems = sectionPages.map(({ group, href }) => {
+  const machineNavItems = options.document ? prepared.map((article, index) => `<li><a href="article-${index + 1}.xhtml">${esc(article.title)}</a></li>`).join("") : sectionPages.map(({ group, href }) => {
     const topics = group.topics.map((topic) => {
       const first = topic.items[0];
       const items = topic.items.map(({ article, index }) =>
@@ -331,7 +334,7 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   const introductionNavItem = introduction ? '<li><a href="introduction.xhtml">Editor&#39;s note</a></li>' : "";
   output.file("nav.xhtml", `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${esc(options.name)} navigation</title></head><body><nav epub:type="toc" id="toc"><h1>${esc(options.name)}</h1><ol>${introductionNavItem}${machineNavItems}</ol></nav></body></html>`);
 
-  const readerContents = sectionPages.map(({ group, articleCount }) => {
+  const readerContents = options.document ? prepared.map((article, index) => `<p><a href="article-${index + 1}.xhtml"><span class="contents-article">${esc(article.title)}</span></a></p>`).join("") : sectionPages.map(({ group, articleCount }) => {
     const label = displaySectionName(group.name);
     const topics = group.topics.map((topic) => {
       const topicLabel = topic.name ? `<h3 class="contents-topic-name">${esc(topic.name)}</h3>` : "";
@@ -386,7 +389,8 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
     const id = `article-${index + 1}`;
     const date = article.published_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(article.published_at)) : "";
     const creator = article.author || article.source;
-    output.file(`${id}.xhtml`, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><h1>${esc(article.title)}</h1><p class="meta">${esc(creator)}${creator !== article.source ? ` · ${esc(article.source)}` : ""}${date ? ` · ${esc(date)}` : ""}</p><hr class="article-rule" />${article.body}<p class="original"><a href="${esc(article.canonical_url || article.url)}">Original source</a></p></body></html>`);
+    const attribution = options.document ? "" : `<p class="meta">${esc(creator)}${creator !== article.source ? ` · ${esc(article.source)}` : ""}${date ? ` · ${esc(date)}` : ""}</p>`;
+    output.file(`${id}.xhtml`, `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${esc(article.title)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body><h1>${esc(article.title)}</h1>${attribution}<hr class="article-rule" />${article.body}${options.document ? "" : `<p class="original"><a href="${esc(article.canonical_url || article.url)}">Original source</a></p>`}</body></html>`);
   });
 
   let assetIndex = 0;
@@ -401,7 +405,10 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   const ncxIntroduction = introduction
     ? `<navPoint id="nav-${++playOrder}" playOrder="${playOrder}"><navLabel><text>Editor's note</text></navLabel><content src="introduction.xhtml"/></navPoint>`
     : "";
-  const ncxSections = sectionPages.map((section) => {
+  const ncxSections = options.document ? prepared.map((article, index) => {
+    const order = ++playOrder;
+    return `<navPoint id="nav-${order}" playOrder="${order}"><navLabel><text>${esc(article.title)}</text></navLabel><content src="article-${index + 1}.xhtml"/></navPoint>`;
+  }).join("") : sectionPages.map((section) => {
     const sectionOrder = ++playOrder;
     const sectionChildren = section.group.topics.map((topic) => {
       if (!topic.items.length) return "";
