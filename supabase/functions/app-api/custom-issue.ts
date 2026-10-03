@@ -9,7 +9,7 @@ export async function queueCustomIssue(req: Request, userId: string): Promise<Re
   const result = await admin.rpc("queue_custom_issue", { p_user_id: userId, p_issue: issue, p_idempotency_key: `custom-issue:${userId}:${key}` });
   if (result.error) {
     if (result.error.message.includes("different issue")) return json({error:result.error.message},409);
-    if (result.error.message.includes("not configured")) return json({error:result.error.message},400);
+    if (result.error.message.includes("not configured")) return json({error:result.error.message,setup_url:"https://reader.antonioskilton.com/?setup=kindle"},400);
     throw result.error;
   }
   const row = Array.isArray(result.data) ? result.data[0] : result.data;

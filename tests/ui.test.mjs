@@ -11,6 +11,7 @@ async function run(code) {
   const w = new Window({ url: 'https://reader.antonioskilton.com' });
   w.document.body.innerHTML = '<div id="app"></div><div id="modal"></div><div id="toast"></div>';
   w.eval(readFileSync(new URL('../starter-editions.js', import.meta.url), 'utf8'));
+  w.eval(readFileSync(new URL('../opml.js', import.meta.url), 'utf8'));
   try { return await w.eval(source + `\nstate=${JSON.stringify(fixture)};token='test-token';(async()=>{${code}})()`); }
   finally { await w.happyDOM.abort(); }
 }
@@ -114,8 +115,18 @@ test('one-time drafts survive closing and article review becomes a full-screen f
 });
 
 test('new one-time users can save an address without scheduling or a test send', async () => {
-  const result = await run(`state.settings.kindle_email=null;state.settings.onboarding_complete=false;oneTimeEditionModal();document.querySelector('#packet-kindle-email').value='new@kindle.com';let calls=[];api=async(path,options)=>{calls.push({path,body:options.body});state.settings={...state.settings,...options.body};return state};const form=document.querySelector('#one-time-kindle');await form.onsubmit({preventDefault(){},currentTarget:form});return {calls,articleForm:!!document.querySelector('#one-time-form')}`);
-  assert.equal(result.calls.length, 1);assert.equal(result.calls[0].path, '/settings');assert.equal(result.calls[0].body.paused, true);assert.ok(result.articleForm);
+  const result = await run(`state.settings.kindle_email=null;state.settings.onboarding_complete=false;oneTimeEditionModal();document.querySelector('#packet-kindle-email').value='new@kindle.com';let calls=[];api=async(path,options)=>{calls.push({path,body:options?.body});if(path==='/kindle'){state.settings={...state.settings,kindle_email:options.body.kindle_email,onboarding_complete:true,paused:true};return {address_configured:true}}return state};const form=document.querySelector('#one-time-kindle');await form.onsubmit({preventDefault(){},currentTarget:form});return {calls,articleForm:!!document.querySelector('#one-time-form'),paused:state.settings.paused}`);
+  assert.deepEqual(Array.from(result.calls,c=>c.path),['/kindle','/me']);assert.equal(result.calls[0].body.kindle_email,'new@kindle.com');assert.ok(result.paused&&result.articleForm);
+});
+
+test('Kindle-only setup bypasses sources and leaves the full reader available', async () => {
+  const result = await run(`state.settings.onboarding_complete=false;state.sections=[];starterPicker();document.querySelector('#kindle-only-setup').click();document.querySelector('#packet-kindle-email').value='reader@kindle.com';let calls=[];api=async(path,options)=>{calls.push(path);if(path==='/kindle')state.settings={...state.settings,kindle_email:options.body.kindle_email,onboarding_complete:true,paused:true};return state};const form=document.querySelector('#one-time-kindle');await form.onsubmit({preventDefault(){},currentTarget:form});return {calls,articleForm:!!document.querySelector('#one-time-form'),settings:state.settings,reader:!!document.querySelector('#account-menu')}`);
+  assert.deepEqual(Array.from(result.calls),['/kindle','/me']);assert.ok(result.settings.onboarding_complete&&result.settings.paused&&result.reader);assert.equal(result.articleForm,false);
+});
+
+test('Kindle setup deep link opens setup after account restoration',async()=>{
+  const result=await run(`history.replaceState(null,'','/?setup=kindle');render();return {form:!!document.querySelector('#one-time-kindle'),url:location.href,address:document.querySelector('#packet-kindle-email').value}`);
+  assert.ok(result.form);assert.ok(!result.url.includes('setup='));assert.equal(result.address,'example@kindle.com');
 });
 
 test('Send now button restores on success and failure', async () => {

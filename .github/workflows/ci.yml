@@ -62,6 +62,10 @@ jobs:
         env:
           BROWSER: ${{ matrix.browser }}
           WIDTHS: 390
+      - name: Verify Kindle-only setup
+        run: node tests/kindle-setup-browser.mjs
+        env:
+          BROWSER: ${{ matrix.browser }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
