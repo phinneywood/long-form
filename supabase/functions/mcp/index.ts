@@ -237,13 +237,13 @@ const TOOLS: any[] = [
   },
   {
     name: "send_custom_issue",
-    description: "Queue supplied custom content as a validated Long Form EPUB to the configured Kindle. Provide content or ordered sections, not both. Text is literal; HTML is sanitized. Source links are citations, not article extraction. Use dedupe_key to prevent repeat sends and get_packet_status to verify provider acceptance; Amazon ingestion is not confirmed.",
+    description: "Queue supplied custom content as a validated Long Form EPUB to the configured Kindle. Provide content or ordered sections, not both. Use markdown or semantic HTML for structured documents; preserve headings, lists, code and tables. Never flatten DOCX/PDF layouts into hard-wrapped prose. Text is literal; formatted content is sanitized. Source links are citations, not article extraction. Use dedupe_key to prevent repeat sends and get_packet_status to verify provider acceptance; Amazon ingestion is not confirmed.",
     inputSchema: {
       type: "object", properties: {
         title: {type:"string",minLength:1,maxLength:80},
         content: {type:"string",minLength:1,maxLength:250000},
-        format: {type:"string",enum:["text","html"]},
-        sections: {type:"array",minItems:1,maxItems:20,items:{type:"object",properties:{title:{type:"string",minLength:1,maxLength:200},content:{type:"string",minLength:1,maxLength:250000},format:{type:"string",enum:["text","html"]}},required:["title","content"],additionalProperties:false}},
+        format: {type:"string",enum:["text","html","markdown"]},
+        sections: {type:"array",minItems:1,maxItems:20,items:{type:"object",properties:{title:{type:"string",minLength:1,maxLength:200},content:{type:"string",minLength:1,maxLength:250000},format:{type:"string",enum:["text","html","markdown"]}},required:["title","content"],additionalProperties:false}},
         source_links: {type:"array",maxItems:40,items:{type:"string",maxLength:2048}},
         dedupe_key: {type:"string",minLength:1,maxLength:120,pattern:"^[A-Za-z0-9._:-]+$"}
       }, required:["title"], oneOf:[{required:["content"],not:{required:["sections"]}},{required:["sections"],not:{required:["content"]}}], additionalProperties:false

@@ -16,6 +16,7 @@
     "jpeg-js": "0.4.4",
     "jszip": "3.10.1",
     "linkedom": "0.18.13",
+    "marked": "16.3.0",
     "parse-srcset": "1.0.2",
     "pngjs": "7.0.0",
     "react": "19.1.1",

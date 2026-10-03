@@ -1,7 +1,8 @@
 import { plainText, sanitizeArticleHtml, sha256, hydrateArticleImages, type ExtractionBudget } from "./article.ts";
+import { marked } from "npm:marked@16.3.0";
 import type { EpubArticle } from "./epub.ts";
 
-export type CustomIssue = { title: string; sections: { title: string; content: string; format: "text" | "html" }[]; source_links: string[] };
+export type CustomIssue = { title: string; sections: { title: string; content: string; format: "text" | "html" | "markdown" }[]; source_links: string[] };
 const bad = (message: string): never => { throw Object.assign(new Error(message), { status: 400 }); };
 const esc = (v: string) => v.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 
@@ -15,7 +16,7 @@ export function customIssueInput(input: any): CustomIssue {
   const sections = raw.map((s: any) => {
     if (typeof s?.title !== "string" || !s.title.trim() || s.title.trim().length > 200) bad("Each section needs a title of 1–200 characters.");
     if (typeof s?.content !== "string" || !s.content.trim() || s.content.length > 250_000) bad("Each section needs 1–250,000 characters of content.");
-    if (s.format !== undefined && s.format !== "text" && s.format !== "html") bad("Content format must be text or html.");
+    if (s.format !== undefined && s.format !== "text" && s.format !== "html" && s.format !== "markdown") bad("Content format must be text, html, or markdown.");
     total += s.content.length;
     return { title: s.title.trim(), content: s.content, format: s.format || "text" };
   });
@@ -37,7 +38,7 @@ export async function customIssueArticles(issue: CustomIssue, jobId: string, bud
   for (const [position, section] of sections.entries()) {
     // Synthetic identity keeps custom text separate from original web articles.
     const url = `https://reader.antonioskilton.com/custom-issues/${jobId}/${position + 1}`;
-    const raw = section.format === "html" ? section.content : section.content.split(/\n\s*\n/).map(p=>`<p>${esc(p).replace(/\n/g,"<br />")}</p>`).join("");
+    const raw = section.format === "markdown" ? marked.parse(section.content, { async: false, gfm: true, breaks: false }) : section.format === "html" ? section.content : section.content.split(/\n\s*\n/).map(p=>`<p>${esc(p).replace(/\n/g,"<br />")}</p>`).join("");
     const body = sanitizeArticleHtml(raw, url);
     if (!plainText(body)) bad(`Section ${position + 1} contains no readable content.`);
     const article: EpubArticle = { title: section.title, url, canonical_url: url, section_name: "Custom issue", source: "Custom content supplied by the reader", author: null, published_at: null, excerpt: plainText(body).slice(0, 500), body, assets: [], warnings: [], article_hash: await sha256(url) };
