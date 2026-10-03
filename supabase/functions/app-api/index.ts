@@ -81,7 +81,7 @@ Deno.serve(async(req)=>{
       }));
       const jobs=await admin.from("digest_jobs")
         .select("id,status,packet_name,edition_name,error,created_at,finished_at,articles:result->articles,issues:result->issues,provider_email_id:result->provider_email_id")
-        .eq("user_id",user.id).order("created_at",{ascending:false}).limit(limit);
+        .eq("user_id",user.id).in("reason",["scheduled","manual","test","one_time"]).order("created_at",{ascending:false}).limit(limit);
       if(jobs.error)throw jobs.error;
       return json({items,limit,jobs:jobs.data||[]});
     }
