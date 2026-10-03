@@ -31,15 +31,15 @@
     },
     {
       "source": "/oauth/authorize",
-      "destination": "https://wuikfmmwvrzpaoevtskn.supabase.co/functions/v1/oauth/authorize"
+      "destination": "/api/oauth/authorize"
     },
     {
       "source": "/oauth/request-code",
-      "destination": "https://wuikfmmwvrzpaoevtskn.supabase.co/functions/v1/oauth/request-code"
+      "destination": "/api/oauth/request-code"
     },
     {
       "source": "/oauth/verify-code",
-      "destination": "https://wuikfmmwvrzpaoevtskn.supabase.co/functions/v1/oauth/verify-code"
+      "destination": "/api/oauth/verify-code"
     },
     {
       "source": "/oauth/token",
@@ -51,11 +51,15 @@
     },
     {
       "source": "/oauth/test-callback",
-      "destination": "https://wuikfmmwvrzpaoevtskn.supabase.co/functions/v1/oauth/test-callback"
+      "destination": "/api/oauth/test-callback"
     },
     {
       "source": "/api/mcp",
       "destination": "https://wuikfmmwvrzpaoevtskn.supabase.co/functions/v1/mcp"
+    },
+    {
+      "source": "/oauth/reviewer-login",
+      "destination": "/api/oauth/reviewer-login"
     }
   ]
 }
