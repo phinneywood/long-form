@@ -20,4 +20,6 @@ Regression coverage exercises ordered complete originals, binary checkpoint roun
 
 Live provider acceptance, Amazon mail-server receipt, Kindle arrival and the iOS ChatGPT host are separate observations. Passing mocked delivery or browser tests does not establish those outcomes. Production retry results are recorded in the release pull request and the existing reliability Trello card.
 
+The live regular-Chat structured-document check found an older database validator still rejecting `markdown`, despite API/worker support. A follow-up migration aligns the queue's accepted formats with `text`, `html` and `markdown`. Its Postgres regression first reproduces the rejection, applies the migration, and verifies exact Markdown storage, idempotent reuse, unsupported-format rejection and unchanged backend-only execution grants.
+
 References: [Supabase CPU limits](https://supabase.com/docs/guides/troubleshooting/edge-function-cpu-limits), [runtime limits](https://supabase.com/docs/guides/functions/limits), [existing reliability task](https://trello.com/c/WOECHU0K), [LangGraph documentation](https://docs.langchain.com/oss/python/langgraph/overview).
