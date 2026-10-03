@@ -18,7 +18,7 @@ test('authorization HTML renders as UTF-8 with PKCE query and security headers r
     const r = await handler(new Request('https://reader.antonioskilton.com/api/oauth/authorize?state=abc&code_challenge=def&redirect_uri=https%3A%2F%2Fchatgpt.com%2Fcallback'));
     assert.equal(r.headers.get('content-type'), 'text/html; charset=utf-8');
     assert.equal(r.headers.get('cache-control'), 'no-store');
-    assert.match(r.headers.get('content-security-policy'), /form-action 'self'/);
+    assert.match(r.headers.get('content-security-policy'), /form-action 'self' https:\/\/chatgpt\.com;/);
     assert.match(await r.text(), /You’ll connect ✓/);
   } finally { globalThis.fetch = original; }
 });
