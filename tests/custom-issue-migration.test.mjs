@@ -14,7 +14,16 @@ test("custom issue queue is atomic, tenant restricted, collision safe, and prese
  insert into user_settings values('10000000-0000-0000-0000-000000000001','test@example.com');`);
  await db.exec(await readFile("supabase/migrations/20261003161539_custom_kindle_issue.sql","utf8"));
  const uid="10000000-0000-0000-0000-000000000001",key=`custom-issue:${uid}:sample`,issue={title:"Custom",sections:[{title:"One",content:"Full text",format:"text"}],source_links:[]};
- const queue=payload=>db.query("select * from public.queue_custom_issue($1,$2::jsonb,$3)",[uid,JSON.stringify(payload),key]);
+ const queue=(payload,suffix="sample")=>db.query("select * from public.queue_custom_issue($1,$2::jsonb,$3)",[uid,JSON.stringify(payload),`custom-issue:${uid}:${suffix}`]);
+ const markdown={title:"Markdown",sections:[{title:"Code",content:'## Example\n\n```python\nif a < b:\n    run()\n```',format:"markdown"}],source_links:[]};
+ await assert.rejects(queue(markdown,"markdown"),/Invalid custom issue section/);
+ await db.exec(await readFile("supabase/migrations/20261003220051_allow_markdown_custom_issue.sql","utf8"));
+ const accepted=(await queue(markdown,"markdown")).rows[0];
+ assert.equal(accepted.created,true);
+ assert.equal((await queue(markdown,"markdown")).rows[0].job_id,accepted.job_id);
+ const stored=(await db.query("select custom_issue from digest_jobs where id=$1",[accepted.job_id])).rows[0].custom_issue;
+ assert.deepEqual(stored,markdown,"Database must preserve the complete supplied Markdown and format");
+ await assert.rejects(queue({...markdown,sections:[{...markdown.sections[0],format:"javascript"}]},"invalid"),/Invalid custom issue section/);
  const first=(await queue(issue)).rows[0],second=(await queue(issue)).rows[0];
  assert.equal(first.created,true);assert.equal(second.created,false);assert.equal(first.job_id,second.job_id);
  await assert.rejects(queue({...issue,title:"Changed"}),/different issue/);
@@ -23,6 +32,6 @@ test("custom issue queue is atomic, tenant restricted, collision safe, and prese
  await db.exec(`insert into digest_jobs(user_id,reason,status,packet_name,article_urls)values('${uid}','one_time','queued','Originals','["https://example.com/original"]');`);
  await assert.rejects(db.exec(`insert into digest_jobs(reason,status,packet_name)values('one_time','queued','Empty');`),/constraint/);
  await assert.rejects(db.exec(`insert into digest_jobs(reason,status,custom_issue)values('scheduled','queued','{}');`),/constraint/);
- assert.equal((await db.query("select count(*)::int as n from digest_jobs")).rows[0].n,2);
+ assert.equal((await db.query("select count(*)::int as n from digest_jobs")).rows[0].n,3);
  }finally{await db.close();}
 });
