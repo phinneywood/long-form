@@ -5,6 +5,7 @@ import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "..
 import { makeEpub, validateEpub, type EpubArticle } from "../_shared/epub.ts";
 import { prepareIssueSupply, type DeliveryRecord } from "../_shared/issue-supply.ts";
 import { publicationItems, featuredPath } from "../_shared/publication.ts";
+import { customIssueInput, customIssueArticles } from "../_shared/custom-issue.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -155,6 +156,13 @@ async function digestForGroup(job: any, group: { section: any; items: EpubArticl
 }
 
 async function buildOneTime(job: any, settings: any, now: Date, displayDate: string, filenameDate: string, deadline: number) {
+  if (job.custom_issue) {
+    const issue = customIssueInput({ ...job.custom_issue, sections: job.custom_issue.sections });
+    const items = await customIssueArticles(issue, job.id, extractionBudget(deadline));
+    const bytes = await makeEpub({ name: issue.title, displayDate, date: now, timezone: settings.timezone || "UTC", label: "Custom issue" }, items);
+    const qa = await validateEpub(bytes, items);
+    return { attachments: [{filename:`${slug(issue.title)}-${filenameDate}.epub`,content:base64(bytes),content_type:"application/epub+zip"}], groups:[{section:{id:null,name:issue.title},items}], feedCount:0, issues:[] as string[], subject:`${issue.title} — ${displayDate}`, qa, media:summarizeMedia(items) };
+  }
   const name = String(job.packet_name || "").trim();
   const urls = Array.isArray(job.article_urls) ? job.article_urls.map(String) : [];
   if (!name || !urls.length || urls.length > 20) throw new Error("This one-time edition request is invalid.");

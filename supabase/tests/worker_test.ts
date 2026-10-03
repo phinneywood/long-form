@@ -8,7 +8,7 @@ Deno.env.set("OPENAI_API_KEY", "test-only-key");
 const { processJob, handleWorkerRequest } = await import("../functions/worker/core.ts");
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 
-async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview" | "publication_preview" | "resend") {
+async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepare_retry" | "scheduled" | "rescheduled" | "test" | "classified" | "first_run_preview" | "publication_preview" | "resend" | "custom" | "custom_retry" | "custom_invalid") {
   const original = globalThis.fetch;
   const job: any = { id: "job-1", user_id: "user-1", status: "queued", attempts: mode === "failed" ? 2 : 0, reason: "manual", created_at: new Date().toISOString(), lookback_hours: 168 };
   if(mode === "scheduled" || mode === "rescheduled")Object.assign(job,{reason:"scheduled",section_id:"section-1",schedule_version:1,lookback_hours:192});
@@ -16,13 +16,14 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
   if(mode === "publication_preview")Object.assign(job,{reason:"publication_preview",result:{publication_kind:"tonight",target_minutes:35}});
   if(mode === "first_run_preview")Object.assign(job,{reason:"first_run_preview"});
   if(mode === "resend")Object.assign(job,{reason:"manual",result:{resend_of_job_id:"source-job",resend_of_created_at:"2026-09-27T12:00:00Z",resend_of_title:"Long Form — September 27, 2026"}});
+  if (mode.startsWith("custom")) Object.assign(job,{reason:"one_time",packet_name:"Custom fixture",article_urls:[],attempts:mode==="custom_invalid"?2:0,custom_issue:{title:"Custom fixture",sections:[{title:"First section",format:"html",content:mode==="custom_invalid"?"<script>bad()</script>":"<h2>Full custom content</h2><p>Keep this exact original supplied text.</p><pre><code>a &lt; b</code></pre>"},{title:"Second section",format:"text",content:"Second section comes after the first."}],source_links:["https://example.com/source"]}});
   let outbox: any = mode === "resend" ? {
     job_id:job.id,first_send_at:null,provider_email_id:null,payload:{
       email:{from:"Long Form <reader@antonioskilton.com>",to:["test@example.com"],subject:"Long Form — September 27, 2026",text:"Your Long Form edition is attached.",attachments:[{filename:"long-form-2026-09-27.epub",content:"frozen-epub-bytes",content_type:"application/epub+zip"}]},
       groups:[{section:{id:null,name:"Original issue"},items:[{article_hash:"hash-1",canonical_url:"https://example.com/original",title:"Original article",pending_id:"pending-original",warnings:[]}]}],
       feedCount:1,issues:[],editorial:{organization:{status:"edited"}},qa:{contentsEntries:1},media:{embedded:1}
     }
-  } : null, sends = 0, failFinalUpdate = mode === "retry", failOutboxInsert = mode === "prepare_retry";
+  } : null, sends = 0, failFinalUpdate = mode === "retry" || mode === "custom_retry", failOutboxInsert = mode === "prepare_retry";
   const feedUpdates: any[] = [];
   const good = { id: "feed-1", user_id: job.user_id, section_id: "section-1", name: "Example", url: "https://8.8.8.8/feed" };
   const bad = { ...good, id: "feed-2", name: "Broken source", url: "https://8.8.8.8/broken" };
@@ -128,7 +129,7 @@ async function scenario(mode: "empty" | "failed" | "partial" | "retry" | "prepar
       assert(job.attempts === (mode === "failed" ? 2 : 0), "Successful preparation stages must not consume failure retries");
       first = await processJob(structuredClone(job));
     }
-    if (mode === "retry" || mode === "prepare_retry") {
+    if (mode === "retry" || mode === "prepare_retry" || mode === "custom_retry") {
       assert(first?.status === "queued", JSON.stringify(first));
       await processJob(structuredClone(job));
     }
@@ -303,4 +304,22 @@ Deno.test("organizer never filters an eligible RSS article before image hydratio
   assert(result.job.result.editorial.organization.other >= 1, "organizer diagnostics should record Other placement");
   assert(result.job.result.qa?.contentsEntries === 2, "organized delivery should pass article-title contents QA for every eligible article");
   assert(result.job.result.media?.discovered === 2 && result.job.result.media?.embedded === 2, "production media diagnostics should include both eligible articles");
+});
+
+Deno.test("custom issue uses validated canonical EPUB, MIME and frozen retry-safe provider delivery", async()=>{
+  const r=await scenario("custom_retry");
+  assert(r.job.status==="sent"&&r.sends===1,"A failed final status write must not send twice");
+  assert(r.fetched.length===0&&r.editorRequests.length===0,"Custom content must not be replaced by discovery or RSS");
+  const email=JSON.parse(r.snapshots[0]),attachment=email.attachments[0];
+  assert(attachment.content_type==="application/epub+zip"&&email.from==="Long Form <reader@antonioskilton.com>");
+  assert(r.outbox.payload.qa&&r.job.result.qa,"QA evidence must survive delivery");
+  const zip=await JSZip.loadAsync(Uint8Array.from(atob(attachment.content),(c)=>c.charCodeAt(0)));
+  assert(await zip.file("mimetype")!.async("string")==="application/epub+zip");
+  const paths=Object.keys(zip.files),cover=paths.find(p=>p.endsWith("cover.jpg"));assert(cover);
+  const nav=await zip.file(paths.find(p=>p.endsWith("nav.xhtml"))!)!.async("string");assert(nav.indexOf("First section")<nav.indexOf("Second section")&&nav.includes("Sources"));
+  const article=await zip.file(paths.find(p=>p.endsWith("article-1.xhtml"))!)!.async("string");assert(article.includes("Keep this exact original supplied text.")&&article.includes("a &lt; b"));
+  assert(r.articleDeliveryWrites>0&&r.pendingDeletes===0,"Record history without consuming the next subscribed issue");
+});
+Deno.test("invalid custom HTML never produces an outbox or provider call",async()=>{
+ const r=await scenario("custom_invalid");assert(r.job.status==="failed"&&r.sends===0&&!r.outbox);
 });
