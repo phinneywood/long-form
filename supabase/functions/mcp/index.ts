@@ -1,3 +1,4 @@
+import { advertisedTools, withDelivery } from "./workflow.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -89,6 +90,22 @@ const TOOLS: any[] = [
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     securitySchemes: READ_SECURITY,
     _meta: { "openai/profile": true, securitySchemes: READ_SECURITY }
+  },
+  {
+    name: "get_kindle_setup",
+    description: "Read the connected account’s saved Kindle address and setup instructions. No feeds, schedule or test email required. Amazon sender approval is unverified; show approved_sender and amazon_settings_url when setup is needed. The full web reader remains available at reader_url.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    outputSchema: { type: "object", additionalProperties: true },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    securitySchemes: READ_SECURITY, _meta: { securitySchemes: READ_SECURITY }
+  },
+  {
+    name: "configure_kindle",
+    description: "Save an explicitly user-supplied Amazon Send-to-Kindle address on the connected Long Form account. Ask for the address if absent; never infer it from the account email. Sends nothing. New accounts finish minimal setup with daily delivery off; existing schedules remain unchanged. Explain the returned Amazon sender-approval step. The web UI uses the same settings.",
+    inputSchema: { type: "object", properties: { kindle_email: { type: "string", maxLength: 320, pattern: "^[^\\s@]+@(?:free\\.)?kindle\\.com$", description: "User-supplied @kindle.com or @free.kindle.com address." } }, required: ["kindle_email"], additionalProperties: false },
+    outputSchema: { type: "object", additionalProperties: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    securitySchemes: WRITE_SECURITY, _meta: { securitySchemes: WRITE_SECURITY }
   },
   {
     name: "list_sources",
@@ -193,11 +210,11 @@ const TOOLS: any[] = [
   },
   {
     name: "get_delivery_history",
-    description: "List articles recently delivered by Long Form, including standalone packets and recurring issues. Use this to answer what was sent recently or avoid recommending articles already delivered.",
+    description: "Read recent delivery jobs and delivered articles from the shared Long Form history, including custom issues and recurring editions. Jobs include pending/failure states; articles appear only after provider acceptance. Use job IDs for status and delivered URLs to avoid repeats. Kindle arrival is unverified.",
     inputSchema: {
       type: "object",
       properties: {
-        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum delivered articles to return. Defaults to 20." }
+        limit: { type: "integer", minimum: 1, maximum: 100, description: "Maximum jobs and maximum delivered articles to return in their separate lists. Defaults to 20." }
       },
       additionalProperties: false
     },
@@ -208,7 +225,8 @@ const TOOLS: any[] = [
           title:{type:"string"}, url:{type:"string"}, published_at:{type:["string","null"]},
           delivered_at:{type:"string"}, delivery_kind:{type:"string"}, packet_name:{type:["string","null"]}, job_id:{type:["string","null"]}
         }, required:["title","url","published_at","delivered_at","delivery_kind","packet_name","job_id"], additionalProperties:false } },
-        limit: { type: "integer" }
+        limit: { type: "integer" },
+        jobs: { type: "array", items: { type: "object", additionalProperties: true } }
       },
       required: ["items","limit"],
       additionalProperties: false
@@ -219,7 +237,7 @@ const TOOLS: any[] = [
   },
   {
     name: "send_packet",
-    description: "Queue a standalone Long Form EPUB from 1–20 article URLs and send it to the user's configured Kindle. Use dedupe_key to make repeated automation runs idempotent.",
+    description: "Only after the user asks to send: queue 1–20 public original article URLs in reading order to their saved Kindle address. ChatGPT selects URLs; Long Form extracts complete originals, validates the EPUB and delivers it. No sources or schedule required. Call get_kindle_setup if the address is missing. Use one stable dedupe_key per logical send; reuse the identical payload after uncertain responses. Queued is not sent: check get_packet_status; sent means provider acceptance, not Kindle arrival.",
     inputSchema: {
       type: "object",
       properties: {
@@ -254,7 +272,7 @@ const TOOLS: any[] = [
   },
   {
     name: "get_packet_status",
-    description: "Get delivery status for send_packet or send_custom_issue. sent means email provider acceptance, not confirmed Amazon ingestion.",
+    description: "Read the actual job for send_packet or send_custom_issue, including delivery summary, error and issues. Poll queued/running with bounded checks; retain the job ID if pending. sent/partial mean provider acceptance, not Amazon ingestion or Kindle arrival. Inspect partial notes and failures; never resend automatically with a new key.",
     inputSchema: {
       type: "object",
       properties: { job_id: { type: "string", minLength: 1, description: "Job ID returned by send_packet." } },
@@ -408,6 +426,10 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
         isError: false
       };
     }
+    case "get_kindle_setup":
+      return toolResult(await apiAsUser(auth.userId, "/kindle"));
+    case "configure_kindle":
+      return toolResult(await apiAsUser(auth.userId, "/kindle", "PATCH", args));
     case "list_sources": {
       const me = await dashboard(auth.userId);
       return toolResult({ sources: sourcesFrom(me).map(sourceView) });
@@ -470,7 +492,7 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
       return toolResult(await apiAsUser(auth.userId, `/delivery-history?limit=${requested}`, "GET"));
     }
     case "send_custom_issue":
-      return toolResult(await apiAsUser(auth.userId, "/custom-issue/queue", "POST", args));
+      return toolResult(withDelivery(await apiAsUser(auth.userId, "/custom-issue/queue", "POST", args)));
     case "send_packet": {
       const nameArg = String(args?.name || "").trim();
       const urls = Array.isArray(args?.urls) ? args.urls.map((url: unknown) => String(url || "").trim()) : [];
@@ -478,16 +500,16 @@ async function callTool(name: string, args: any, auth: AuthInfo) {
       if (!nameArg || nameArg.length > 80) return toolResult({ error: "Packet name must be 1–80 characters." }, true);
       if (!urls.length || urls.length > 20) return toolResult({ error: "Add between 1 and 20 article URLs." }, true);
       if (dedupeKey !== undefined && !/^[A-Za-z0-9._:-]{1,120}$/.test(dedupeKey)) return toolResult({ error: "Invalid dedupe key." }, true);
-      return toolResult(await apiAsUser(auth.userId, "/one-time/queue", "POST", {
+      return toolResult(withDelivery(await apiAsUser(auth.userId, "/one-time/queue", "POST", {
         name: nameArg,
         urls,
         ...(dedupeKey === undefined ? {} : { dedupe_key: dedupeKey })
-      }));
+      })));
     }
     case "get_packet_status": {
       const jobId = String(args?.job_id || "").trim();
       if (!/^[0-9a-f-]{36}$/i.test(jobId)) return toolResult({ error: "A valid packet job ID is required." }, true);
-      return toolResult(await apiAsUser(auth.userId, `/one-time/jobs/${jobId}`, "GET"));
+      return toolResult(withDelivery(await apiAsUser(auth.userId, `/one-time/jobs/${jobId}`, "GET")));
     }
     case "send_now":
       return toolResult(await apiAsUser(auth.userId, "/send-now", "POST", {}));
@@ -523,12 +545,12 @@ Deno.serve(async (req: Request) => {
       return rpcResult(id, {
         protocolVersion,
         capabilities: { tools: {} },
-        serverInfo: { name: "long-form", version: "0.2.0" },
-        instructions: "Manage Long Form sources, editor settings, daily issues, and standalone article packets delivered to the user's Kindle."
+        serverInfo: { name: "long-form", version: "0.3.0" },
+        instructions: "Set up Kindle, send original article URLs or supplied documents, and observe status/history. Use the saved account recipient and stable dedupe keys. No feeds or schedule required. The full Long Form web reader and editor use the same account at https://reader.antonioskilton.com."
       });
     }
     if (msg.method === "ping") return rpcResult(id, {});
-    if (msg.method === "tools/list") return rpcResult(id, { tools: TOOLS });
+    if (msg.method === "tools/list") return rpcResult(id, { tools: advertisedTools(TOOLS, req.url) });
     if (msg.method.startsWith("notifications/")) return new Response(null, { status: 202 });
 
     if (msg.method === "tools/call") {
@@ -542,7 +564,7 @@ Deno.serve(async (req: Request) => {
         return rpcResult(id, await callTool(name, args, auth));
       } catch (e: any) {
         if (e?.rpcCode) return rpcError(id, e.rpcCode, e.message);
-        return rpcResult(id, toolResult({ error: String(e?.message || e) }, true));
+        return rpcResult(id, toolResult({ error: String(e?.message || e), ...(e?.status ? {status:e.status} : {}), ...(e?.data?.setup_url ? {setup_url:e.data.setup_url} : {}) }, true));
       }
     }
 

@@ -4,12 +4,24 @@ Production MCP endpoint:
 
 `https://reader.antonioskilton.com/api/mcp`
 
+## Simplified ChatGPT workflow
+
+Default discovery exposes seven tools: `get_profile`, `get_kindle_setup`, `configure_kindle`, `send_packet`, `send_custom_issue`, `get_packet_status`, `get_delivery_history`. ChatGPT researches and selects one-off material; Long Form extracts original articles or formats supplied documents, validates EPUBs, and delivers through the existing frozen outbox.
+
+Setup uses the existing account settings. `get_kindle_setup` returns the saved address, approved sender, Amazon link and web setup link. `configure_kindle` accepts only an explicitly user-supplied `@kindle.com` / `@free.kindle.com` address. A new account finishes setup with daily delivery off; an existing account retains its schedule. Neither call sends or creates sources. Amazon approval and arrival are unverified.
+
+Sending/status responses retain the existing `job` and add `delivery` with state, provider acceptance, unverified Kindle arrival, error and issues. History retains `items` and adds bounded `jobs`, including custom issues and pending/failed attempts. Reuse the same dedupe key and payload after an uncertain response. A partial result can be an image note rather than omitted text.
+
+The full web reader/editor, subscriptions and scheduled editions remain available on the same account. Existing advanced tool calls still work. Clients needing the full discovery list can use `https://reader.antonioskilton.com/api/mcp?toolset=reader`; its OAuth protected resource remains the canonical query-free URL. This is a compatibility option, not a second service.
+
 ## Tool model
 
 Long Form keeps the model-facing surface intentionally narrow. The MCP does not expose SQL, generic HTTP requests, or arbitrary user IDs.
 
 | Tool | Scope | Effect |
 | --- | --- | --- |
+| `get_kindle_setup` | `reader:read` | Read minimal setup and Amazon instructions |
+| `configure_kindle` | `reader:read reader:write` | Save the supplied Kindle address; no send |
 | `get_profile` | `reader:read` | Identify the connected account |
 | `list_sources`, `find_feeds`, `preview_sources` | `reader:read` | Inspect recurring sources and chronological candidates |
 | `add_source` | `reader:read reader:write` | Add a recurring website/feed |
