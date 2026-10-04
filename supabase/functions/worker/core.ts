@@ -199,7 +199,7 @@ async function buildOneTime(job: any, settings: any, now: Date, displayDate: str
     throw new FrozenManifestReady("packet-article");
   }
   logEvent("packet.packaging_started", { job_id: job.id, articles: items.length });
-  const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition" }, items);
+  const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition", libraryTitle: name, issueCover: true }, items);
   const qa = await validateEpub(bytes, items);
   const media = summarizeMedia(items);
   logEvent("epub.qa_completed", { job_id: job.id, ...qa, media_discovered: media.discovered, media_embedded: media.embedded, media_failed: media.failed, media_omitted: media.omitted });

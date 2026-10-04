@@ -32,6 +32,8 @@ export type EpubOptions = {
   timezone: string;
   label?: string;
   libraryTitle?: string;
+  /** Use the issue name as the cover lead instead of promoting article #1. */
+  issueCover?: boolean;
   /** Custom documents have chapter navigation and an issue-title cover. */
   document?: boolean;
   maxAssetBytes?: number;
@@ -262,8 +264,8 @@ export async function makeEpub(options: EpubOptions, articles: EpubArticle[]) {
   zip.folder("META-INF")!.file("container.xml", `<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
   const output = zip.folder("OEBPS")!;
-  const documentCover = [{ section: options.name, story: "" }, ...articles.filter(a => a.title !== options.name && a.title !== "Sources").slice(0, 2).map(a => ({ section: a.title, story: "" }))];
-  const cover = await makeCoverJpeg(options, articles.length, options.document ? documentCover : buildCoverLines(articles));
+  const issueCover = [{ section: options.name, story: "" }, ...articles.filter(a => a.title !== options.name && a.title !== "Sources").slice(0, 2).map(a => ({ section: a.title, story: "" }))];
+  const cover = await makeCoverJpeg(options, articles.length, options.document || options.issueCover ? issueCover : buildCoverLines(articles));
   // JPEG/PNG/GIF are already compressed. Deflating them again burns the
   // worker's CPU budget for negligible savings; keep text compressed below.
   output.file("cover.jpg", cover, { compression: "STORE" });

@@ -90,6 +90,8 @@ Deno.test("original packets checkpoint one article per invocation and preserve o
     const page = await zip.file(`OEBPS/article-${i}.xhtml`)!.async("string");
     assert(page.includes(`Complete original ${i}.`) && page.includes(`run(${i})`) && page.includes("<pre>"), `Source ${i} text/code missing`);
   }
+  const opf = await zip.file("OEBPS/content.opf")!.async("string");
+  assert(opf.includes("<dc:title>Original sources</dc:title>"), "Kindle/library metadata must use the requested packet name without appending the date");
   const image = Object.keys(zip.files).find(p => p.startsWith("OEBPS/images/" ) && p.endsWith(".png"));
   assert(image && (await zip.file(image)!.async("uint8array"))[0] === 137, "Binary asset must survive the saved checkpoint");
   assert(r.keys[0] === "morning-reader-packet-job");
