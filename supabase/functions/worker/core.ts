@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { Buffer } from "node:buffer";
+import { ArticlePreparationError, jobRetryDelay } from "../_shared/preparation-errors.ts";
 import { extractArticle, extractionBudget, hydrateArticleImages, omitArticleImages, type ExtractionBudget } from "../_shared/article.ts";
 import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "../_shared/delivery.ts";
 import { makeEpub, validateEpub, type EpubArticle } from "../_shared/epub.ts";
@@ -187,7 +188,7 @@ async function buildOneTime(job: any, settings: any, now: Date, displayDate: str
     budget.allowImageTranscoding = false;
     logEvent("packet.article_started", { job_id: job.id, article: index + 1, total: urls.length, url: urls[index] });
     try { items.push(await extractArticle({ url: urls[index], includeImages: true, budget })); }
-    catch (error) { throw new Error(`Article ${index + 1} could not be prepared: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) { throw new ArticlePreparationError(index + 1, error); }
     const manifest = {
       kind: "one_time_packet", version: 1, name, urls, imageBytesRemaining: budget.imageBytes,
       items: items.map(item => ({ ...item, assets: (item.assets || []).map(asset => ({ ...asset, bytes: base64(asset.bytes) })) })),
@@ -486,6 +487,7 @@ async function freezePayload(job:any,payload:any){
 export async function processJob(queuedJob: any, deadline = Date.now() + 90_000) {
   const started = performance.now();
   const claim = await admin.from("digest_jobs").update({ status: "running", started_at: new Date().toISOString(), attempts: queuedJob.attempts + 1, error: null }).eq("id", queuedJob.id).eq("status", "queued").select("*").maybeSingle();
+  if (claim.error) throw claim.error;
   if (!claim.data) return null;
   const job = claim.data;
   try {
@@ -573,11 +575,13 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     }
     const message = (error instanceof Error ? error.message : String((error as any)?.message || error)).slice(0, 800);
     const attempts = job.attempts;
-    const nextStatus = attempts < 3 && !(error instanceof DeliveryNeedsReview) ? "queued" : "failed";
+    const retryDelay = error instanceof DeliveryNeedsReview ? null : jobRetryDelay(error, attempts);
+    const nextStatus = retryDelay === null ? "failed" : "queued";
     const patch: any = { status: nextStatus, error: message };
-    if (nextStatus === "queued") patch.run_after = new Date(Date.now() + attempts * 10 * 60_000).toISOString();
+    if (nextStatus === "queued") patch.run_after = new Date(Date.now() + retryDelay!).toISOString();
     else patch.finished_at = new Date().toISOString();
-    await admin.from("digest_jobs").update(patch).eq("id", job.id);
+    const persisted = await admin.from("digest_jobs").update(patch).eq("id", job.id);
+    if (persisted.error) throw persisted.error;
     logEvent(nextStatus === "failed" ? "digest.failed" : "digest.retry_scheduled", { job_id: job.id, user_id: job.user_id, reason: job.reason, error: message, attempt: attempts, duration_ms: Math.round(performance.now() - started) }, nextStatus === "failed" ? "error" : "warn");
     return { job: job.id, status: nextStatus, error: message };
   }
