@@ -1,0 +1,80 @@
+name: Repair extraction candidate
+on:
+  push:
+    branches: [fix/packet-extraction-recovery]
+    paths: [.github/workflows/repair-extraction.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Apply exact, source-guarded repair
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+          article = Path('supabase/functions/_shared/article.ts')
+          core = Path('supabase/functions/worker/core.ts')
+          for path, expected in [(article, 'e4ff9986e9d4819854f50606d2c5a1bcfb3761f0'), (core, 'b86c95265abf215f98215c215e70b345e1551557')]:
+              actual = subprocess.check_output(['git', 'hash-object', str(path)], text=True).strip()
+              assert actual == expected, f'Source changed: {path}: {actual}'
+          def once(text, old, new):
+              assert text.count(old) == 1, f'Expected exactly one occurrence: {old[:100]}'
+              return text.replace(old, new, 1)
+          text = article.read_text()
+          text = once(text, 'import { fetchPublic } from "./network.ts";', 'import { fetchPublic } from "./network.ts";\nimport { ArticleContentError } from "./preparation-errors.ts";')
+          start = text.index('  const match = raw.match(', text.index('export function recoverEmbeddedImageUrl'))
+          end = text.index('\n  if (!match)', start)
+          text = text[:start] + r'''  // Parse the wrapper query before decoding. Otherwise outer &w/&q options
+            // become part of the publisher path (diagram.png&w=...), producing HTTP 400.
+            try {
+              const embedded = new URL(raw, "https://image-wrapper.invalid").searchParams.get("url");
+              if (embedded) {
+                const publisher = new URL(embedded);
+                if (["http:", "https:"].includes(publisher.protocol)) return publisher.toString();
+              }
+            } catch { /* Continue with conservative legacy recovery. */ }
+            const match = raw.match(/https?%3A%2F%2F[^&#?\s"'<>]+/i);''' + text[end:]
+          text = once(text, "    'meta[name=\"date\"]',", "    'meta[name=\"citation_publication_date\"]',\n    'meta[name=\"date\"]',")
+          text = once(text, '  const author = meta(document,', '  const citationAuthors = Array.from(document.querySelectorAll(\'meta[name="citation_author"]\')).map((node: any) => node.getAttribute("content") || "").filter(Boolean).join(" & ");\n  const author = meta(document,')
+          text = once(text, '|| visibleAuthors(document) || structured.author;', '|| citationAuthors || visibleAuthors(document) || structured.author;')
+          text = once(text, "['meta[property=\"og:title\"]', 'meta[name=\"twitter:title\"]']", "['meta[name=\"citation_title\"]', 'meta[property=\"og:title\"]', 'meta[name=\"twitter:title\"]']")
+          text = once(text, '  const parsed = documentation\n    ? { content: documentation.innerHTML,', '''  // PMC provides an explicit authored article section; keep its tables and
+            // references rather than asking Readability to score scholarly markup.
+            const scholarly = new URL(pageUrl).hostname === "pmc.ncbi.nlm.nih.gov" && document.querySelector('meta[name="citation_title"]')
+              ? document.querySelector('article section[aria-label="Article content"]')
+              : null;
+            const authored = documentation || scholarly;
+            const parsed = authored
+              ? { content: authored.innerHTML,''')
+          for message in ['Long Form could not identify the main article text.', 'Long Form could not extract enough article text.', 'This article is too large to prepare safely. Open the original article instead.']:
+              text = once(text, f'new Error("{message}")', f'new ArticleContentError("{message}")')
+          article.write_text(text)
+          text = core.read_text()
+          text = once(text, 'import { Buffer } from "node:buffer";', 'import { Buffer } from "node:buffer";\nimport { ArticlePreparationError, jobRetryDelay } from "../_shared/preparation-errors.ts";')
+          text = once(text, 'catch (error) { throw new Error(`Article ${index + 1} could not be prepared: ${error instanceof Error ? error.message : String(error)}`); }', 'catch (error) { throw new ArticlePreparationError(index + 1, error); }')
+          text = once(text, '  if (!claim.data) return null;', '  if (claim.error) throw claim.error;\n  if (!claim.data) return null;')
+          text = once(text, '    const nextStatus = attempts < 3 && !(error instanceof DeliveryNeedsReview) ? "queued" : "failed";', '    const retryDelay = error instanceof DeliveryNeedsReview ? null : jobRetryDelay(error, attempts);\n    const nextStatus = retryDelay === null ? "failed" : "queued";')
+          text = once(text, 'new Date(Date.now() + attempts * 10 * 60_000).toISOString()', 'new Date(Date.now() + retryDelay!).toISOString()')
+          text = once(text, '    await admin.from("digest_jobs").update(patch).eq("id", job.id);', '    const persisted = await admin.from("digest_jobs").update(patch).eq("id", job.id);\n    if (persisted.error) throw persisted.error;')
+          core.write_text(text)
+          PY
+      - run: npm ci
+      - run: deno check supabase/functions/worker/index.ts supabase/functions/app-api/index.ts supabase/functions/mcp/index.ts
+      - name: Run all publishing regressions
+        run: deno test --allow-env --allow-read supabase/tests
+      - name: Commit only the verified source changes
+        run: |
+          git diff --check
+          git diff --stat
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add supabase/functions/_shared/article.ts supabase/functions/worker/core.ts
+          git commit -m 'Fix packet error classification, PMC extraction and optimizer image URLs'
+          git push origin HEAD:refs/heads/fix/packet-extraction-recovery
