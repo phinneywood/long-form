@@ -5,6 +5,7 @@ import { XMLParser } from "npm:fast-xml-parser@5.11.1";
 import parseSrcsetModule from "npm:parse-srcset@1.0.2";
 import { ImageMagick, initializeImageMagick, MagickFormat } from "npm:@imagemagick/magick-wasm@0.0.43";
 import { fetchPublic } from "./network.ts";
+import { ArticleContentError } from "./preparation-errors.ts";
 export { fetchPublicText } from "./network.ts";
 
 export type ExtractionBudget = { imageBytes: number; deadline: number; allowImageTranscoding?: boolean };
@@ -106,7 +107,16 @@ export function recoverEmbeddedImageUrl(value: string): string {
   } catch {
     // Recover an encoded publisher origin only when the candidate itself is not a valid absolute URL.
   }
-  const match = raw.match(/https?%3A%2F%2F[^?#\s"'<>]+/i);
+  // Parse the wrapper query before decoding. Otherwise outer &w/&q options
+  // become part of the publisher path (diagram.png&w=...), producing HTTP 400.
+  try {
+    const embedded = new URL(raw, "https://image-wrapper.invalid").searchParams.get("url");
+    if (embedded) {
+      const publisher = new URL(embedded);
+      if (["http:", "https:"].includes(publisher.protocol)) return publisher.toString();
+    }
+  } catch { /* Continue with conservative legacy recovery. */ }
+  const match = raw.match(/https?%3A%2F%2F[^&#?\s"'<>]+/i);
   if (!match) return raw;
   try {
     const decoded = decodeURIComponent(match[0]);
@@ -447,21 +457,29 @@ export function extractArticleDocument(pageHtml: string, pageUrl: string) {
   const source = meta(document, ['meta[property="og:site_name"]', 'meta[name="application-name"]']) || structured.source;
   const publishedAt = meta(document, [
     'meta[property="article:published_time"]',
+    'meta[name="citation_publication_date"]',
     'meta[name="date"]',
     'meta[itemprop="datePublished"]',
     "time[datetime]",
   ]) || structured.publishedAt;
-  const author = meta(document, ['meta[name="author"]', 'meta[property="article:author"]']) || visibleAuthors(document) || structured.author;
-  const title = meta(document, ['meta[property="og:title"]', 'meta[name="twitter:title"]']) || structured.title;
+  const citationAuthors = Array.from(document.querySelectorAll('meta[name="citation_author"]')).map((node: any) => node.getAttribute("content") || "").filter(Boolean).join(" & ");
+  const author = meta(document, ['meta[name="author"]', 'meta[property="article:author"]']) || citationAuthors || visibleAuthors(document) || structured.author;
+  const title = meta(document, ['meta[name="citation_title"]', 'meta[property="og:title"]', 'meta[name="twitter:title"]']) || structured.title;
   const excerpt = meta(document, ['meta[name="description"]', 'meta[property="og:description"]']) || structured.excerpt;
   // Mintlify explicitly identifies the authored documentation body. Readability
   // treats its heavily wrapped code blocks as UI and can silently delete every
   // example. Use that body directly, then apply the same sanitizer below.
   const documentation = document.querySelector("#content.mdx-content");
-  const parsed = documentation
-    ? { content: documentation.innerHTML, title: document.title, siteName: source, byline: author, excerpt }
+  // PMC provides an explicit authored article section; keep its tables and
+  // references rather than asking Readability to score scholarly markup.
+  const scholarly = new URL(pageUrl).hostname === "pmc.ncbi.nlm.nih.gov" && document.querySelector('meta[name="citation_title"]')
+    ? document.querySelector('article section[aria-label="Article content"]')
+    : null;
+  const authored = documentation || scholarly;
+  const parsed = authored
+    ? { content: authored.innerHTML, title: document.title, siteName: source, byline: author, excerpt }
     : new Readability(document as any, { charThreshold: 180 }).parse();
-  if (!parsed?.content || plainText(parsed.content).length < 180) throw new Error("Long Form could not identify the main article text.");
+  if (!parsed?.content || plainText(parsed.content).length < 180) throw new ArticleContentError("Long Form could not identify the main article text.");
   const finalSource = normalizeTitle(parsed.siteName || source);
   let finalTitle = normalizeTitle(title || parsed.title || document.title || "Untitled");
   if (finalSource) {
@@ -718,8 +736,8 @@ export async function extractArticle(input: ExtractArticleInput): Promise<Articl
     body = page.html;
   }
   if (!body && page) body = page.html;
-  if (!body || plainText(body).length < 80) throw pageError || new Error("Long Form could not extract enough article text.");
-  if (body.length > 250_000) throw new Error("This article is too large to prepare safely. Open the original article instead.");
+  if (!body || plainText(body).length < 80) throw pageError || new ArticleContentError("Long Form could not extract enough article text.");
+  if (body.length > 250_000) throw new ArticleContentError("This article is too large to prepare safely. Open the original article instead.");
   if (pageError && feedBody) warnings.push("The publisher page was unavailable, so Long Form used the feed version.");
 
   const title = normalizeTitle(page?.title || input.title || "Untitled") || "Untitled";
