@@ -7,7 +7,7 @@ Deno.env.set("RESEND_API_KEY", "test-only-key");
 const { processJob, handleWorkerRequest } = await import("../functions/worker/core.ts");
 function assert(value: unknown, message = "Assertion failed"): asserts value { if (!value) throw new Error(message); }
 
-async function packetScenario(mode: "normal" | "checkpoint_failure" | "final_failure" | "mismatch" | "request") {
+async function packetScenario(mode: "normal" | "checkpoint_failure" | "final_failure" | "mismatch" | "request" | "permanent_http" | "challenge_http" | "transient_http") {
   const original = globalThis.fetch;
   const job: any = { id: "packet-job", user_id: "reader-1", reason: "one_time", status: "queued", attempts: 0,
     created_at: "2026-10-03T20:00:00Z", packet_name: "Original sources", result: {},
@@ -26,6 +26,9 @@ async function packetScenario(mode: "normal" | "checkpoint_failure" | "final_fai
       if (url.pathname === "/diagram.webp") return new Response(webp);
       const i = Number(url.pathname.match(/article-(\d+)/)?.[1]);
       assert(i > 0 && i <= 5);
+      if (i === 4 && mode === "permanent_http") return new Response("Forbidden", { status: 403 });
+      if (i === 4 && mode === "transient_http") return new Response("Unavailable", { status: 503, headers: { "retry-after": "3600" } });
+      if (i === 4 && mode === "challenge_http") return new Response(`<html><head><title>Checking your browser - reCAPTCHA</title></head><body><article><p>${"Please verify that you are human before proceeding. ".repeat(100)}</p></article></body></html>`);
       return new Response(`<html><head><title>Source ${i}</title></head><body><article><h1>Source ${i}</h1><p>${`Complete original ${i}. `.repeat(35)}</p><h2>Example</h2><pre><code>if x &lt; ${i}:\n    run(${i})</code></pre>${i === 1 ? '<img src="/diagram.png" alt="Diagram">' : i === 2 ? '<img src="/diagram.webp" alt="Other diagram">' : ''}</article></body></html>`);
     }
     assert(url.hostname === "database.example.invalid", `Unexpected network ${url}`);
@@ -112,4 +115,28 @@ Deno.test("changed packet identity fails safely instead of using another request
 Deno.test("worker continuation stops before the next queued job can share its CPU budget", async () => {
   const r = await packetScenario("request");
   assert(r.job.status === "queued" && r.checkpoints.length === 1 && r.sends === 0);
+});
+
+Deno.test("permanent article HTTP failure stops on the first failure without email or partial outbox", async () => {
+  const r = await packetScenario("permanent_http");
+  assert(r.job.status === "failed" && r.job.attempts === 1);
+  assert(r.sends === 0 && !r.outbox && r.checkpoints.length === 3);
+  assert(r.fetches.filter(p => p === "/article-4").length === 1);
+  assert(r.job.error.includes("Article 4") && r.job.error.includes("HTTP 403"));
+});
+
+Deno.test("HTTP 200 browser challenges are explicit terminal failures, never reading content", async () => {
+  const r = await packetScenario("challenge_http");
+  assert(r.job.status === "failed" && r.job.attempts === 1);
+  assert(r.sends === 0 && !r.outbox && r.checkpoints.length === 3);
+  assert(r.job.error.includes("browser verification"));
+});
+
+Deno.test("transient article HTTP failures retain the attempt cap and publisher backoff", async () => {
+  const started = Date.now();
+  const r = await packetScenario("transient_http");
+  assert(r.job.status === "failed" && r.job.attempts === 3);
+  assert(r.sends === 0 && !r.outbox && r.checkpoints.length === 3);
+  assert(r.fetches.filter(p => p === "/article-4").length === 3);
+  assert(Date.parse(r.job.run_after) >= started + 3_600_000);
 });

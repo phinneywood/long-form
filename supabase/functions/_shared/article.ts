@@ -451,6 +451,12 @@ async function fetchMediumFeedArticle(requestedUrl: string, budget: ExtractionBu
 
 export function extractArticleDocument(pageHtml: string, pageUrl: string) {
   const document = (parseHTML(pageHtml) as any).document;
+  // Some publishers return HTTP 200 for a browser/CAPTCHA interstitial.
+  // Never package that page as an article or schedule futile retries.
+  const pageTitle = String(document.title || "").trim();
+  if (/^(?:Checking your browser(?:\s*[-–—]\s*reCAPTCHA)?|Just a moment[.!…]*|Attention Required!?\s*\|\s*Cloudflare)$/i.test(pageTitle)) {
+    throw new ArticleContentError("The publisher requires browser verification; no article was retrieved. Choose another public source or supply the document.");
+  }
   const canonicalRaw = document.querySelector('link[rel="canonical"]')?.getAttribute("href") || pageUrl;
   const canonicalUrl = resolveHttpUrl(canonicalRaw, pageUrl) || pageUrl;
   const structured = structuredMetadata(document);
