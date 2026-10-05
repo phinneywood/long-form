@@ -1,10 +1,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { Buffer } from "node:buffer";
+import { ArticlePreparationError, jobRetryDelay } from "../_shared/preparation-errors.ts";
 import { extractArticle, extractionBudget, hydrateArticleImages, omitArticleImages, type ExtractionBudget } from "../_shared/article.ts";
 import { dispatchPrepared, DeliveryNeedsReview, checkAttachmentBudget } from "../_shared/delivery.ts";
 import { makeEpub, validateEpub, type EpubArticle } from "../_shared/epub.ts";
 import { prepareIssueSupply, type DeliveryRecord } from "../_shared/issue-supply.ts";
 import { publicationItems, featuredPath } from "../_shared/publication.ts";
+import { customIssueInput, customIssueArticles } from "../_shared/custom-issue.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -155,24 +157,49 @@ async function digestForGroup(job: any, group: { section: any; items: EpubArticl
 }
 
 async function buildOneTime(job: any, settings: any, now: Date, displayDate: string, filenameDate: string, deadline: number) {
+  if (job.custom_issue) {
+    const issue = customIssueInput({ ...job.custom_issue, sections: job.custom_issue.sections });
+    const items = await customIssueArticles(issue, job.id, extractionBudget(deadline));
+    const bytes = await makeEpub({ name: issue.title, displayDate, date: now, timezone: settings.timezone || "UTC", label: "Reading packet", document: true }, items);
+    const qa = await validateEpub(bytes, items);
+    return { attachments: [{filename:`${slug(issue.title)}-${filenameDate}.epub`,content:base64(bytes),content_type:"application/epub+zip"}], groups:[{section:{id:null,name:issue.title},items}], feedCount:0, issues:[] as string[], subject:`${issue.title} — ${displayDate}`, qa, media:summarizeMedia(items) };
+  }
   const name = String(job.packet_name || "").trim();
   const urls = Array.isArray(job.article_urls) ? job.article_urls.map(String) : [];
   if (!name || !urls.length || urls.length > 20) throw new Error("This one-time edition request is invalid.");
-  const budget = extractionBudget(deadline);
-  const items: EpubArticle[] = new Array(urls.length);const errors: { index: number; error: unknown }[] = [];let cursor = 0;
-  async function articleWorker() {
-    while (true) {
-      const index = cursor++;if (index >= urls.length) return;
-      try { items[index] = await extractArticle({ url: urls[index], includeImages: true, budget }); }
-      catch (error) { errors.push({ index, error }); }
-    }
+  // One article per invocation: Edge CPU limits apply to active computing, not
+  // elapsed time. Parallel extraction/transcoding cannot extend that budget.
+  // Keep ordered originals and prepared image bytes across retries, then build
+  // the EPUB in a separate invocation using the existing continuation path.
+  const frozen = job.result?.preparation_manifest;
+  if (frozen && (frozen.kind !== "one_time_packet" || frozen.version !== 1 ||
+    frozen.name !== name || JSON.stringify(frozen.urls) !== JSON.stringify(urls) ||
+    !Array.isArray(frozen.items) || frozen.items.length > urls.length ||
+    !Number.isFinite(frozen.imageBytesRemaining) || frozen.imageBytesRemaining < 0)) {
+    throw new DeliveryNeedsReview("The saved packet preparation does not match this request. Nothing was sent.");
   }
-  await Promise.all(Array.from({ length: Math.min(3, urls.length) }, () => articleWorker()));
-  if (errors.length) {
-    errors.sort((a, b) => a.index - b.index);const first = errors[0];
-    throw new Error(`Article ${first.index + 1} could not be prepared: ${first.error instanceof Error ? first.error.message : String(first.error)}`);
+  const items: EpubArticle[] = (frozen?.items || []).map((item: any) => ({
+    ...item, assets: (item.assets || []).map((asset: any) => ({ ...asset, bytes: Buffer.from(asset.bytes, "base64") })),
+  }));
+  if (items.length < urls.length) {
+    const index = items.length;
+    const budget = extractionBudget(deadline);
+    budget.imageBytes = Math.min(budget.imageBytes, frozen?.imageBytesRemaining ?? budget.imageBytes);
+    budget.allowImageTranscoding = false;
+    logEvent("packet.article_started", { job_id: job.id, article: index + 1, total: urls.length, url: urls[index] });
+    try { items.push(await extractArticle({ url: urls[index], includeImages: true, budget })); }
+    catch (error) { throw new ArticlePreparationError(index + 1, error); }
+    const manifest = {
+      kind: "one_time_packet", version: 1, name, urls, imageBytesRemaining: budget.imageBytes,
+      items: items.map(item => ({ ...item, assets: (item.assets || []).map(asset => ({ ...asset, bytes: base64(asset.bytes) })) })),
+    };
+    const saved = await admin.rpc("checkpoint_digest_preparation", { p_job_id: job.id, p_user_id: job.user_id, p_manifest: manifest });
+    if (saved.error) throw saved.error;
+    logEvent("packet.article_completed", { job_id: job.id, article: index + 1, total: urls.length });
+    throw new FrozenManifestReady("packet-article");
   }
-  const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition" }, items);
+  logEvent("packet.packaging_started", { job_id: job.id, articles: items.length });
+  const bytes = await makeEpub({ name, displayDate, date: now, timezone: settings.timezone || "UTC", label: "One-time edition", libraryTitle: name, issueCover: true }, items);
   const qa = await validateEpub(bytes, items);
   const media = summarizeMedia(items);
   logEvent("epub.qa_completed", { job_id: job.id, ...qa, media_discovered: media.discovered, media_embedded: media.embedded, media_failed: media.failed, media_omitted: media.omitted });
@@ -460,6 +487,7 @@ async function freezePayload(job:any,payload:any){
 export async function processJob(queuedJob: any, deadline = Date.now() + 90_000) {
   const started = performance.now();
   const claim = await admin.from("digest_jobs").update({ status: "running", started_at: new Date().toISOString(), attempts: queuedJob.attempts + 1, error: null }).eq("id", queuedJob.id).eq("status", "queued").select("*").maybeSingle();
+  if (claim.error) throw claim.error;
   if (!claim.data) return null;
   const job = claim.data;
   try {
@@ -547,11 +575,13 @@ export async function processJob(queuedJob: any, deadline = Date.now() + 90_000)
     }
     const message = (error instanceof Error ? error.message : String((error as any)?.message || error)).slice(0, 800);
     const attempts = job.attempts;
-    const nextStatus = attempts < 3 && !(error instanceof DeliveryNeedsReview) ? "queued" : "failed";
+    const retryDelay = error instanceof DeliveryNeedsReview ? null : jobRetryDelay(error, attempts);
+    const nextStatus = retryDelay === null ? "failed" : "queued";
     const patch: any = { status: nextStatus, error: message };
-    if (nextStatus === "queued") patch.run_after = new Date(Date.now() + attempts * 10 * 60_000).toISOString();
+    if (nextStatus === "queued") patch.run_after = new Date(Date.now() + retryDelay!).toISOString();
     else patch.finished_at = new Date().toISOString();
-    await admin.from("digest_jobs").update(patch).eq("id", job.id);
+    const persisted = await admin.from("digest_jobs").update(patch).eq("id", job.id);
+    if (persisted.error) throw persisted.error;
     logEvent(nextStatus === "failed" ? "digest.failed" : "digest.retry_scheduled", { job_id: job.id, user_id: job.user_id, reason: job.reason, error: message, attempt: attempts, duration_ms: Math.round(performance.now() - started) }, nextStatus === "failed" ? "error" : "warn");
     return { job: job.id, status: nextStatus, error: message };
   }
@@ -586,7 +616,16 @@ export async function handleWorkerRequest(request: Request) {
     const deadline = Date.now() + 90_000;
     for (const job of jobs || []) {
       if (Date.now() > deadline - 20_000) break;
-      results.push(await processJob(job, deadline));
+      const result = await processJob(job, deadline);
+      results.push(result);
+      // One preparation/packaging stage per invocation. A continuation already
+      // kicks the queue; terminal results also kick any other selected work so
+      // covers for multiple packets cannot share one CPU budget.
+      if (!result?.continuation && (jobs || []).length > 1) {
+        const kick = await admin.rpc("kick_digest_worker");
+        if (kick.error) logEvent("worker.queue_kick_failed", { invocation_id: invocationId, error: kick.error.message }, "warn");
+      }
+      break;
     }
     logEvent("worker.completed", { invocation_id: invocationId, jobs: (jobs || []).length, duration_ms: Math.round(performance.now() - started) });
     return json({ ok: true, processed: results });

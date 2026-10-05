@@ -1,5 +1,7 @@
 import {admin,auth,cors,dashboard,discoverFeeds,emailConfigured,firstIssueSummary,json,normEmail,normalizeUrl,preview,probe,requestCode,routePath,systemHealth,validEmail,validTimezone,validUrl,verifyCode} from "./core.ts";
 import { publicationRoute } from "./publication.ts";
+import { queueCustomIssue } from "./custom-issue.ts";
+import { kindleRoute } from "./kindle.ts";
 import {extractArticle,extractionBudget} from "../_shared/article.ts";
 import {editionSchedulePatch} from "../_shared/schedule.ts";
 import {firstIssueInputKey,firstIssueInterrupted} from "../_shared/first-issue.ts";
@@ -53,7 +55,9 @@ Deno.serve(async(req)=>{
       const v=await verifyCode(email,code);logEvent("auth.verified",{request_id:requestId,user_id:v.user.id});return json({ok:true,token:v.raw,expires_at:v.expiresAt,...await dashboard(v.user.id,v.user.email)});
     }
     const a=await auth(req);if(!a)return json({error:"Unauthorized"},401);const {user,sessionId}=a;
+    const kindle = await kindleRoute(req,route,user.id); if(kindle)return kindle;
     const publication = await publicationRoute(req,route,user); if(publication)return publication;
+    if(route==="/custom-issue/queue"&&req.method==="POST")return await queueCustomIssue(req,user.id);
     if(route==="/auth/logout"&&req.method==="POST"){const{error}=await admin.from("sessions").update({revoked_at:new Date().toISOString()}).eq("id",sessionId);if(error)throw error;return json({ok:true})}
     if(route==="/me"&&req.method==="GET")return json(await dashboard(user.id,user.email));
     if(route==="/system"&&req.method==="GET"){const health=await systemHealth(user.id);logEvent("system.health_viewed",{request_id:requestId,user_id:user.id,alerts:health.alerts.length});return json(health)}
@@ -75,7 +79,11 @@ Deno.serve(async(req)=>{
         packet_name:row.digests?.edition_name||null,
         job_id:row.digests?.job_id||null,
       }));
-      return json({items,limit});
+      const jobs=await admin.from("digest_jobs")
+        .select("id,status,packet_name,edition_name,error,created_at,finished_at,articles:result->articles,issues:result->issues,provider_email_id:result->provider_email_id")
+        .eq("user_id",user.id).in("reason",["scheduled","manual","test","one_time"]).order("created_at",{ascending:false}).limit(limit);
+      if(jobs.error)throw jobs.error;
+      return json({items,limit,jobs:jobs.data||[]});
     }
     if(route==="/export"&&req.method==="GET")return json({exported_at:new Date().toISOString(),...await dashboard(user.id,user.email)});
     if(route==="/account"&&req.method==="DELETE"){const{error}=await admin.from("app_users").delete().eq("id",user.id);if(error)throw error;return json({ok:true})}
@@ -348,7 +356,11 @@ Deno.serve(async(req)=>{
         p_article_urls:urls,
         p_idempotency_key:idempotencyKey
       });
-      if(queued.error)throw queued.error;
+      if(queued.error){
+        if(queued.error.message.includes("not configured"))return json({error:queued.error.message,setup_url:"https://reader.antonioskilton.com/?setup=kindle"},400);
+        if(queued.error.message.includes("different"))return json({error:queued.error.message},409);
+        throw queued.error;
+      }
       const row=Array.isArray(queued.data)?queued.data[0]:queued.data;
       if(!row?.job_id)throw new Error("Long Form did not return a queued packet job.");
       const job=await admin.from("digest_jobs")

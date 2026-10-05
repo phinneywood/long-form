@@ -29,9 +29,9 @@ async function reset(){
   frame.srcdoc=html;
   status.textContent=`Replaying ${Object.keys(snapshot.articles).length} captured originals. No live API calls, account changes, or sends.`;
 }
-document.querySelector('#qa-file').onchange=async event=>{
-  try{const file=event.target.files[0];if(!file)return;if(file.size>40*1024*1024)throw Error('Snapshot exceeds 40 MB.');const data=JSON.parse(await file.text());if(data.version!==1||!data.responses?.['/me']||!data.responses?.['/publication/editions']||!data.articles)throw Error('Choose a Long Form validation snapshot.');if(!/@resend\.dev$/.test(data.responses['/me'].user.email)||!data.responses['/me'].settings.paused)throw Error('Only paused validation accounts are supported.');snapshot=data;await reset();}catch(error){status.textContent=error.message;}
-};
+async function loadSnapshot(text){try{if(text.length>40*1024*1024)throw Error('Snapshot exceeds 40 MB.');const data=JSON.parse(text);if(data.version!==1||!data.responses?.['/me']||!data.responses?.['/publication/editions']||!data.articles)throw Error('Choose a Long Form validation snapshot.');if(!/@resend\.dev$/.test(data.responses['/me'].user.email)||!data.responses['/me'].settings.paused)throw Error('Only paused validation accounts are supported.');snapshot=data;await reset();}catch(error){status.textContent=error.message;}}
+document.querySelector('#qa-file').onchange=async event=>{const file=event.target.files[0];if(file)await loadSnapshot(await file.text());};
+document.querySelector('#qa-load').onclick=()=>loadSnapshot(document.querySelector('#qa-json').value);
 document.querySelector('#qa-width').onchange=event=>frame.style.width=`${Number(event.target.value)}px`;
 document.querySelector('#qa-reset').onclick=reset;
 document.querySelector('#qa-scenario').onchange=reset;

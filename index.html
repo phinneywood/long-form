@@ -260,6 +260,7 @@ function starterPicker(){
       <h1>Add your sources.</h1>
       <div class="editorial-copy">Add the websites and feeds you already read. Long Form will use them as recurring sources for one publication.</div>
       <button class="mt-5 btn primary" id="onboarding-add-source">+ Add a source</button>
+      <p class="mt-3">Just sending a reading packet? <button class="btn small-btn" id="kindle-only-setup">Set up Kindle only</button> Sources and daily delivery are optional.</p>
       <div class="source-examples"><span>Examples from a real Long Form setup</span>Simon Willison · Commoncog · The Beautiful Mess · Lessons · Rands in Repose</div>
       ${sources.length?`<div class="onboarding-source-list">${sources.map(feed=>`<div class="onboarding-source-row"><div><strong>${esc(displayText(feed.name||feed.url))}</strong><div class="technical-note">${esc(feed.url)}</div></div></div>`).join('')}</div>`:''}
       <div class="starter-footer">
@@ -269,6 +270,7 @@ function starterPicker(){
     </section>`,
     '<button class="btn small-btn" id="sign-out">Sign out</button>');
   document.querySelector('#sign-out').onclick=signOut;
+  document.querySelector('#kindle-only-setup').onclick=()=>oneTimeKindleSetup(false);
   document.querySelector('#onboarding-add-source').onclick=singleFeedModal;
   document.querySelector('#onboarding-import').onclick=opmlImportModal;
   document.querySelector('#review-sources').onclick=()=>starterReady();
@@ -992,15 +994,16 @@ async function watchJob(jobId){
     if(box?.dataset.jobId===jobId)box.textContent='Still processing. Delivery history shows the latest status; close this window whenever you like.';
   }finally{activeWatchers.delete(jobId)}
 }
-function oneTimeKindleSetup(){
-  openModal(`<div class="row"><h2>Where should your issue go?</h2><button class="btn small-btn" id="close-modal">Close</button></div><p>Add <strong>${SENDER}</strong> to Amazon’s approved personal-document senders, then enter your Kindle address. No schedule or test issue will be created.</p><p><a href="${AMAZON_SETTINGS}" target="_blank" rel="noopener">Open Amazon settings ↗</a></p><form id="one-time-kindle"><div class="field"><label for="packet-kindle-email">Send-to-Kindle address</label><input class="input" id="packet-kindle-email" type="email" required></div><button class="btn primary">Save & choose articles</button></form>`);
+function oneTimeKindleSetup(chooseArticles=true){
+  openModal(`<div class="row"><h2>Where should your issue go?</h2><button class="btn small-btn" id="close-modal">Close</button></div><p>Add <strong>${SENDER}</strong> to Amazon’s approved personal-document senders, then enter your Kindle address. No schedule or test issue will be created.</p><p><a href="${AMAZON_SETTINGS}" target="_blank" rel="noopener">Open Amazon settings ↗</a></p><form id="one-time-kindle"><div class="field"><label for="packet-kindle-email">Send-to-Kindle address</label><input class="input" id="packet-kindle-email" type="email" value="${esc(state.settings.kindle_email||'')}" required></div><button class="btn primary">${chooseArticles?'Save & choose articles':'Save Kindle setup'}</button></form>`);
   document.querySelector('#close-modal').onclick=closeModal;
   document.querySelector('#one-time-kindle').onsubmit=async event=>{
     event.preventDefault();const button=event.currentTarget.querySelector('button');button.disabled=true;
     const version=modalVersion;
     try{
-      state=await api('/settings',{method:'PATCH',body:{kindle_email:document.querySelector('#packet-kindle-email').value.trim(),...(!state.settings.onboarding_complete?{onboarding_complete:true,paused:true}:{})}});
-      modalDirty=false;dashboard();if(version===modalVersion)oneTimeEditionModal();
+      await api('/kindle',{method:'PATCH',body:{kindle_email:document.querySelector('#packet-kindle-email').value.trim()}});
+      state=await api('/me');
+      modalDirty=false;dashboard();if(version===modalVersion){if(chooseArticles)oneTimeEditionModal();else{closeModal(true);toast('Kindle address saved. Approve the sender in Amazon before sending.')}};
     }catch(err){toast(err.message);button.disabled=false}
   };
 }
@@ -1032,6 +1035,11 @@ async function historyModal(){
   modal.querySelectorAll('.resend-packet').forEach(button=>button.onclick=()=>{const job=state.jobs.find(j=>j.id===button.dataset.id);oneTimeEditionModal({name:job.packet_name,urls:job.article_urls.join('\n'),request_id:crypto.randomUUID()})});
 }
 function render(){
+  if(new URL(location.href).searchParams.get('setup')==='kindle'){
+    const url=new URL(location.href);url.searchParams.delete('setup');history.replaceState(null,'',url);
+    if(state?.settings?.onboarding_complete)dashboard();else starterPicker();
+    oneTimeKindleSetup(false);return;
+  }
   if(state?.settings?.onboarding_complete){dashboard();const active=(state.jobs||[]).find(j=>['queued','running'].includes(j.status));if(active)void watchJob(active.id);return}
   if(feedCount()===0)return starterPicker();
   if(firstRunJob()){dashboard();firstRunDeliveryChoice();return}
