@@ -10,7 +10,11 @@ function replay(data,scenario){
     if(scenario==='error'&&path==='/publication/editions'){result={error:'Captured edition API failure.'};code=503;}
     else if(scenario==='empty'&&path==='/publication/editions')result={editions:[]};
     else if(path==='/reader/article')result=data.articles[body.edition_id?`${body.edition_id}:${body.position}`:`raw:${body.article_id}`];
-    else if(path==='/reader/state')result={ok:true}; // Replay-local; never persisted to an account.
+    else if(path==='/reader/state'){
+      const key=body.article_key||(body.edition_id?`${body.edition_id}:${body.position}`:`raw:${body.article_id}`),article=data.articles[key];
+      if(article){article.reading={...article.reading,...body,updated_at:new Date().toISOString()};const states=data.responses['/reader/library'].states;const old=states.find(s=>s.article_key===key);if(old)Object.assign(old,article.reading);else states.push({article_key:key,...article.reading});}
+      result={ok:true}; // Replay-local; never persisted to an account.
+    }
     else if((options.method||'GET')==='GET')result=data.responses[path];
     if(!result){result={error:'Developer replay: this action needs a live validation test. No request was sent.'};code=409;}
     return new Response(JSON.stringify(clone(result)),{status:code,headers:{'Content-Type':'application/json'}});
@@ -22,6 +26,10 @@ async function reset(){
   if(!snapshot)return;
   const response=await fetch('/');if(!response.ok)throw Error('Could not load the current application.');
   let html=await response.text();
+  // Inline the publication script too, so all storage stays in replay memory.
+  const publication=await fetch('/publication.js');if(!publication.ok)throw Error('Could not load the current publication interface.');
+  const publicationText=await publication.text();
+  html=html.replace('<script src="/publication.js"></script>',()=>`<script>${publicationText.replace(/<\/script/gi,'<\\/script')}<\/script>`);
   html=html.replace(/\blocalStorage\b/g,'qaLocalStorage').replace(/\bsessionStorage\b/g,'qaSessionStorage');
   const payload=JSON.stringify(snapshot).replace(/</g,'\\u003c');
   const scenario=JSON.stringify(document.querySelector('#qa-scenario').value);

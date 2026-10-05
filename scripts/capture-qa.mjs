@@ -11,11 +11,11 @@ async function read(path,body){
 const snapshot={version:1,captured_at:new Date().toISOString(),responses:{},articles:{}};
 const me=await read('/me');
 if(!/@resend\.dev$/.test(me.user.email)||!me.settings.paused)throw Error('Only a paused Resend validation account may be captured.');
-snapshot.responses['/me']=me;
-for(const path of ['/publication/editions','/reader/library','/editor/history','/delivery-history','/system'])snapshot.responses[path]=await read(path);
-for(const edition of snapshot.responses['/publication/editions'].editions){
+snapshot.responses['/me']={...me,jobs:me.jobs.map(({result,...job})=>({...job,result:result?{issues:result.issues}:null}))};
+for(const path of ['/publication/editions','/reader/library','/editor/history','/delivery-history','/system','/publication/feed'])snapshot.responses[path]=await read(path);
+for(const edition of snapshot.responses['/publication/editions'].editions.slice(0,Number(process.env.LF_QA_EDITIONS||1))){
   for(let position=0;position<edition.items.length;position++)snapshot.articles[`${edition.id}:${position}`]=await read('/reader/article',{edition_id:edition.id,position});
 }
 const out=process.env.LF_QA_OUT||'test-results/account-snapshot.json';
-await fs.mkdir('test-results',{recursive:true});await fs.writeFile(out,JSON.stringify(snapshot),{mode:0o600});
+await fs.mkdir('test-results',{recursive:true});await fs.writeFile(out+'.tmp',JSON.stringify(snapshot),{mode:0o600});JSON.parse(await fs.readFile(out+'.tmp','utf8'));await fs.rename(out+'.tmp',out);
 console.log(`Captured ${snapshot.responses['/publication/editions'].editions.length} editions and ${Object.keys(snapshot.articles).length} originals. No account changes or sends.`);
