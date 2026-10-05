@@ -4,14 +4,14 @@ The publication remains subject to Antonio’s product acceptance. Delivery work
 
 ## Observed journey
 
-Used the existing paused Resend validation account’s real stored editions and original article text in the deployed app’s developer replay. The account had nine nighttime editions and no daily edition. Walked Today → edition → original → editor → preferences → Library at phone width. The original presentation showed “Your first publication is waiting to take shape” despite the available editions; the latest original headlines were below a large generic introduction. Reading had competing page and article-frame scrollbars, with discussion below the article viewport. The editor put its question box after all conversation history. Nine generic nighttime titles on the same date made past editions hard to identify.
+Used the existing paused Resend validation account’s real stored editions and original article text in the deployed app’s developer replay. The account had nine nighttime editions and no daily edition. Walked Today → edition → original → editor → preferences → Library at phone width. The original presentation showed “Your first publication is waiting to take shape” despite the available editions; the latest original headlines were below a large generic introduction. Reading had competing page and article-frame scrollbars, with discussion below the article viewport. The editor put its question box after all conversation history. Nine generic nighttime titles on the same date made past editions hard to identify. Desktop delivery history treated ready publication preparations as failed sends even though nothing had been sent.
 
 ## Focused fixes
 
 - Today leads with the latest daily edition, falling back to the available nighttime edition, its actual date, finite reading time, direct reading action and original headlines. Complete subscribed coverage remains accessible.
 - The original stays in its script-free sandbox, sized to its complete content. The page scrolls once; Edition, Discuss and Save stay visible. Paragraph context and position survive discussion, reload and return navigation. Real article markup exposed a mismatch between DOM text and extracted text around inline tags; paragraph matching now normalizes that spacing and prefers an exact paragraph match.
 - The editor’s question form comes before recent conversation; newest responses appear first. The actual paragraph in view can be inspected before asking. Durable preference confirmation remains separate. Basic bold emphasis in model answers renders after HTML escaping.
-- Past editions show their lead headline. The chronological feed has a hash route so reload and browser history keep that view. Failed prepare/send requests restore their buttons instead of throwing a second error.
+- Past editions show their lead headline. The chronological feed has a hash route so reload and browser history keep that view. Failed prepare/send requests restore their buttons instead of throwing a second error. Delivery history excludes publication preparations and retains actual send failures and their errors.
 
 ## Repeatable browser workflow
 

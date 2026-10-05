@@ -224,3 +224,8 @@ test('source names and errors are escaped in alert links and dialogs',async()=>{
   const result=await run(`state.sections[0].name='<img src=x onerror=alert(1)>';state.sections[0].feeds[0].name='<script>bad()</script>';state.sections[0].feeds[0].enabled=true;state.sections[0].feeds[0].last_error='<img src=x>';dashboard();reviewSource('f1');return {injected:document.querySelectorAll('#app img,#app script,#modal img,#modal script').length,text:modal.textContent}`);
   assert.equal(result.injected,0);assert.match(result.text,/<script>bad\(\)<\/script>/);
 });
+
+test('delivery history excludes prepared editions without disguising failed sends',async()=>{
+ const result=await run(`state.jobs=[{id:'preview',reason:'publication_preview',status:'ready',created_at:'2026-10-01',result:{edition_title:'Prepared but never sent'}},{id:'failed',reason:'manual',status:'failed',created_at:'2026-10-01',error:'Provider rejected the send'},{id:'sent',reason:'scheduled',status:'sent',created_at:'2026-10-01',result:{articles:3}}];api=async()=>state;await historyModal();return {text:modal.textContent,count:modal.querySelectorAll('.preview-item').length}`);
+ assert.equal(result.count,2);assert.doesNotMatch(result.text,/Prepared but never sent|Unknown error/);assert.match(result.text,/Provider rejected the send/);assert.match(result.text,/Submitted for delivery/);
+});
