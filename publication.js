@@ -81,7 +81,8 @@ async function readPage(context,epoch){
   const r=await api('/reader/article',{method:'POST',body:context});if(epoch!==publicationEpoch)return;
   readerParagraphs=r.paragraphs||[];
   currentReading={...context,article_key:r.article_key,paragraph:r.reading.paragraph||0,progress:r.reading.progress||0,title:r.article.title,saved:r.reading.saved};
-  const cached=JSON.parse(localStorage.getItem(localReadingKey(r.article_key))||'null');if(cached&&cached.updated_at>Date.parse(r.reading.updated_at||0)){currentReading.progress=cached.progress;currentReading.paragraph=cached.paragraph;}
+  const cached=JSON.parse(localStorage.getItem(localReadingKey(r.article_key))||'null');
+  if(cached&&(cached.updated_at>Date.parse(r.reading.updated_at||0)||(cached.progress===currentReading.progress&&cached.paragraph===currentReading.paragraph))){currentReading.progress=cached.progress;currentReading.paragraph=cached.paragraph;currentReading.reader_y=cached.reader_y;currentReading.reader_width=cached.reader_width;}
   const e=context.edition_id?editionById(context.edition_id):null;
   const path=context.reader_path==='featured'&&e?e.featured:e?.items.map((_,i)=>i)||[],at=path.indexOf(context.position);
   rememberReading();
@@ -94,11 +95,11 @@ async function readPage(context,epoch){
   // Article HTML is sanitized by the extraction pipeline. No scripts or active
   // permissions are granted. Data images are the frozen publication bytes.
   readerFrame.srcdoc=`<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline';"><style>html{background:#f7f5f0}body{margin:16px 0 50px;color:#28342e;font:20px/1.75 Georgia,serif;overflow-wrap:anywhere}h1,h2,h3{line-height:1.2}img{max-width:100%;height:auto}pre{white-space:pre-wrap;font-size:.8em}table{display:block;max-width:100%;overflow-x:auto}blockquote{margin:1em 0;border-left:2px solid #d8d9ce;padding-left:16px}a{color:#913d30}figure{margin:1em 0}p{margin:0 0 1.1em}</style><body>${r.article.body}</body></html>`;
-  const frame=readerFrame,progress=currentReading.progress;
+  const frame=readerFrame,progress=currentReading.progress,resume=currentReading;
   frame.onload=()=>{if(epoch!==publicationEpoch)return;const doc=frame.contentDocument;if(!doc)return;
     const resize=()=>{if(!frame.isConnected)return;const style=doc.defaultView.getComputedStyle(doc.body);frame.style.height=`${Math.ceil(doc.body.offsetHeight+parseFloat(style.marginTop)+parseFloat(style.marginBottom))}px`;};
     resize();readerResizeObserver=new ResizeObserver(resize);readerResizeObserver.observe(doc.body);
-    const top=frame.getBoundingClientRect().top+window.scrollY,max=Math.max(1,frame.clientHeight-window.innerHeight+64);if(progress>0)window.scrollTo(0,top+max*progress-64);
+    const top=frame.getBoundingClientRect().top+window.scrollY,max=Math.max(1,frame.clientHeight-window.innerHeight+64),y=Number.isFinite(resume.reader_y)&&resume.reader_width===frame.clientWidth?resume.reader_y:max*progress;if(progress>0)window.scrollTo(0,top+y-64);
   };
   document.querySelector('#discuss-reading').onclick=()=>{persistReading();location.hash='editor';};
   document.querySelector('#save-reading').onclick=async ev=>{currentReading.saved=!currentReading.saved;try{await api('/reader/state',{method:'PATCH',body:{...context,saved:currentReading.saved}});ev.target.textContent=currentReading.saved?'Saved':'Save';}catch(err){currentReading.saved=!currentReading.saved;toast(err.message);}};
@@ -107,12 +108,13 @@ function persistReading(){
   if(!readerFrame?.isConnected||!readerFrame.contentDocument||!currentReading?.article_key)return;
   const doc=readerFrame.contentDocument,frameTop=readerFrame.getBoundingClientRect().top,max=Math.max(1,readerFrame.clientHeight-window.innerHeight+64),y=Math.max(0,64-frameTop);
   currentReading.progress=Math.min(1,Math.max(0,y/max));
+  currentReading.reader_y=y;currentReading.reader_width=readerFrame.clientWidth;
   const selector='p,h1,h2,h3,h4,h5,h6,li,blockquote,pre',ps=[...doc.querySelectorAll(selector)].filter(p=>!p.querySelector(selector));
   const visible=ps.find(p=>p.getBoundingClientRect().bottom+frameTop>64&&(p.textContent||'').trim()),text=(visible?.textContent||'').replace(/\s+/g,' ').trim();
   const normalized=paragraphText(text);let number=normalized?readerParagraphs.findIndex(p=>paragraphText(p)===normalized):-1;
   if(number<0&&normalized)number=readerParagraphs.findIndex(p=>paragraphText(p).includes(normalized));if(number>=0)currentReading.paragraph=number;
   currentReading.passage=(readerParagraphs[currentReading.paragraph]||'').slice(0,600);
-  localStorage.setItem(localReadingKey(currentReading.article_key),JSON.stringify({progress:currentReading.progress,paragraph:currentReading.paragraph,updated_at:Date.now()}));
+  localStorage.setItem(localReadingKey(currentReading.article_key),JSON.stringify({progress:currentReading.progress,paragraph:currentReading.paragraph,reader_y:y,reader_width:readerFrame.clientWidth,updated_at:Date.now()}));
   rememberReading();
   void api('/reader/state',{method:'PATCH',body:{...currentReading,progress:currentReading.progress,paragraph:currentReading.paragraph}}).catch(()=>{});
 }
