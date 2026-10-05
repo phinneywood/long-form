@@ -6,6 +6,9 @@ const currentRoute=()=>location.hash.slice(1)||'today';
 const readingContextKey=()=>`longFormReadingContext:${state?.user?.id}`;
 function rememberReading(){if(currentReading)sessionStorage.setItem(readingContextKey(),JSON.stringify(currentReading));}
 const readerHref=r=>r.edition_id?`#read/${r.edition_id}/${r.position}${r.reader_path==='featured'?'/featured':''}`:`#raw/${r.article_id}`;
+// HTML extraction adds spaces around inline tags; DOM text does not. Match
+// their actual letters/numbers, preferring a complete paragraph over a mention.
+const paragraphText=value=>value.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu,'').toLowerCase();
 function publicationNav(active){return `<nav class="publication-nav" aria-label="Publication"><a href="#today" ${active==='today'?'aria-current="page"':''}>Today</a><a href="#explore" ${active==='explore'?'aria-current="page"':''}>Explore</a><a href="#editor" ${active==='editor'?'aria-current="page"':''}>Editor</a><a href="#library" ${active==='library'?'aria-current="page"':''}>Library</a></nav>`;}
 function publicationShell(content,active='today'){
   app.innerHTML=shell(publicationNav(active)+`<div class="publication-page">${content}</div>`,'<button class="btn account-menu-btn" id="account-menu" aria-label="Account menu">Account</button>');
@@ -106,7 +109,8 @@ function persistReading(){
   currentReading.progress=Math.min(1,Math.max(0,y/max));
   const selector='p,h1,h2,h3,h4,h5,h6,li,blockquote,pre',ps=[...doc.querySelectorAll(selector)].filter(p=>!p.querySelector(selector));
   const visible=ps.find(p=>p.getBoundingClientRect().bottom+frameTop>64&&(p.textContent||'').trim()),text=(visible?.textContent||'').replace(/\s+/g,' ').trim();
-  const number=text?readerParagraphs.findIndex(p=>p.includes(text)): -1;if(number>=0)currentReading.paragraph=number;
+  const normalized=paragraphText(text);let number=normalized?readerParagraphs.findIndex(p=>paragraphText(p)===normalized):-1;
+  if(number<0&&normalized)number=readerParagraphs.findIndex(p=>paragraphText(p).includes(normalized));if(number>=0)currentReading.paragraph=number;
   currentReading.passage=(readerParagraphs[currentReading.paragraph]||'').slice(0,600);
   localStorage.setItem(localReadingKey(currentReading.article_key),JSON.stringify({progress:currentReading.progress,paragraph:currentReading.paragraph,updated_at:Date.now()}));
   rememberReading();
@@ -128,7 +132,7 @@ async function rawFeedPage(){
     document.querySelectorAll('.raw-feed-item').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const a=await api('/reader/open',{method:'POST',body:{url:r.items[Number(b.dataset.index)].url}});location.hash='raw/'+a.article_id;}catch(err){toast(err.message);b.disabled=false;}});
   }catch(err){if(epoch!==publicationEpoch)return;publicationShell(`<h1>Chronological feed</h1><p role="alert">${esc(err.message)}</p><a class="btn" href="#explore">Return to sources</a>`,'explore');}
 }
-function messageHtml(m){const r=m.response||{};return `<article class="editor-exchange"><p class="editor-question">${esc(m.question)}</p><div class="editor-answer ${r.unavailable?'notice':''}">${esc(r.answer).replace(/\n/g,'<br>')}</div>${r.citations?.length?`<div class="editor-evidence">${r.citations.map(c=>`<a href="${c.edition_id?'#read/'+esc(c.edition_id)+'/'+c.position:esc(safeHref(c.url))}" ${c.edition_id?'':'target="_blank" rel="noopener noreferrer"'}>${esc(c.title||'Original passage')}${c.delivered_at?' · submitted '+esc(dateLabel(c.delivered_at)):''}</a>`).join('')}</div>`:''}
+function messageHtml(m){const r=m.response||{};return `<article class="editor-exchange"><p class="editor-question">${esc(m.question)}</p><div class="editor-answer ${r.unavailable?'notice':''}">${esc(r.answer).replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>')}</div>${r.citations?.length?`<div class="editor-evidence">${r.citations.map(c=>`<a href="${c.edition_id?'#read/'+esc(c.edition_id)+'/'+c.position:esc(safeHref(c.url))}" ${c.edition_id?'':'target="_blank" rel="noopener noreferrer"'}>${esc(c.title||'Original passage')}${c.delivered_at?' · submitted '+esc(dateLabel(c.delivered_at)):''}</a>`).join('')}</div>`:''}
     ${m.proposed_guidance?`<div class="preference-proposal"><p class="small">Temporary conversation guidance: ${esc(m.proposed_guidance)}</p>${m.confirmed_at?'<p class="micro-label">Saved for future nighttime editions</p>':`<button class="btn confirm-guidance" data-id="${esc(m.id)}">Save as my nighttime preferences</button>`}</div>`:''}
     ${r.compose_request?`<button class="btn primary compose-request" data-request="${esc(m.id)}">Compose this reading edition</button>`:''}${r.send_request?`<button class="btn primary review-send-request" data-request="${esc(m.id)}">Review exact edition for Kindle</button>`:''}</article>`;}
 async function editorPage(epoch){
