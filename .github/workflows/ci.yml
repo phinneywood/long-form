@@ -57,6 +57,9 @@ jobs:
         run: node tests/browser.mjs
         env:
           BROWSER: ${{ matrix.browser }}
+      - name: Verify isolated developer replay
+        if: matrix.browser == 'chromium'
+        run: node tests/developer-browser.mjs
       - name: Preserve existing settings and onboarding journeys
         run: node tests/settings-browser.mjs
         env:

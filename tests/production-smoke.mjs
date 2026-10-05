@@ -24,6 +24,7 @@ for(let attempt=0;attempt<30;attempt++){
  }catch(error){console.log('Deployment not ready:',String(error));}
  await new Promise(r=>setTimeout(r,4000));
 }
+for(const developerPath of ['/developer','/developer.html','/developer.js'])assert.equal((await fetch(origin+developerPath)).status,404,'Developer replay must not exist in production');
 assert.ok(matched,'Production must serve the exact committed HTML, CSS, OPML, and legal files');
 const browser=await chromium.launch();
 const errors=[],screens=[];
